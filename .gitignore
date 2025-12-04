@@ -1,0 +1,37 @@
+# Binaries
+bin/
+build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Wails
+wails.json
+frontend/dist/
+frontend/wailsjs/
+
+# Go
+go.sum
+vendor/
+
+# Node
+frontend/node_modules/
+frontend/npm-debug.log
+frontend/yarn-error.log
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# App Data
+*.db
+*.log
+tomee_manager.db
