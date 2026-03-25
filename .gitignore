@@ -32,6 +32,12 @@ frontend/yarn-error.log
 # Vite temp files
 *.timestamp-*.mjs
 
+# Wails auto-generated
+frontend/package.json.md5
+
+# Backup files
+*.bak
+
 # OS
 .DS_Store
 Thumbs.db
