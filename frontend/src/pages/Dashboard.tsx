@@ -1,13 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Start, Stop, Restart } from '../../wailsjs/go/service/TomEEService';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
-import { FaPlay, FaStop, FaRedo } from 'react-icons/fa';
+import { FaPlay, FaStop, FaRedo, FaCopy, FaCheck } from 'react-icons/fa';
 
 const Dashboard: React.FC = () => {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<'Running' | 'Stopped' | 'Unknown'>('Unknown');
     const [logs, setLogs] = useState<string[]>([]);
+    const [copied, setCopied] = useState(false);
     const logsEndRef = useRef<HTMLDivElement>(null);
+
+    const copyLogs = () => {
+        navigator.clipboard.writeText(logs.join('\n')).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        });
+    };
 
     useEffect(() => {
         const cancelLogListener = EventsOn("tomee-log", (log: string) => {
@@ -70,7 +78,7 @@ const Dashboard: React.FC = () => {
                         <button
                             className="btn btn-success btn-sm gap-2"
                             onClick={() => handleAction('Start', Start)}
-                            disabled={loading}
+                            disabled={loading || status === 'Running'}
                         >
                             {/* @ts-ignore */}
                             {loading ? <span className="loading loading-spinner loading-xs" /> : <FaPlay className="text-xs" />}
@@ -79,7 +87,7 @@ const Dashboard: React.FC = () => {
                         <button
                             className="btn btn-error btn-sm gap-2"
                             onClick={() => handleAction('Stop', Stop)}
-                            disabled={loading}
+                            disabled={loading || status !== 'Running'}
                         >
                             {/* @ts-ignore */}
                             {loading ? <span className="loading loading-spinner loading-xs" /> : <FaStop className="text-xs" />}
@@ -88,7 +96,7 @@ const Dashboard: React.FC = () => {
                         <button
                             className="btn btn-warning btn-sm gap-2"
                             onClick={() => handleAction('Restart', Restart)}
-                            disabled={loading}
+                            disabled={loading || status !== 'Running'}
                         >
                             {/* @ts-ignore */}
                             {loading ? <span className="loading loading-spinner loading-xs" /> : <FaRedo className="text-xs" />}
@@ -107,6 +115,15 @@ const Dashboard: React.FC = () => {
                     <span className="text-[0.7rem] font-mono text-base-content/30 ml-2 uppercase tracking-wider">
                         catalina.out
                     </span>
+                    <button
+                        className="ml-auto btn btn-ghost btn-xs gap-1 text-base-content/40 hover:text-base-content/70"
+                        onClick={copyLogs}
+                        disabled={logs.length === 0}
+                        title="Copy logs to clipboard"
+                    >
+                        {copied ? <FaCheck className="text-success text-[0.6rem]" /> : <FaCopy className="text-[0.6rem]" />}
+                        {copied ? 'Copied' : 'Copy'}
+                    </button>
                 </div>
                 <div className="terminal-body flex-1 overflow-y-auto">
                     {logs.length === 0 && (
