@@ -2,6 +2,7 @@ package model
 
 type Config struct {
 	TomEEPath    string `json:"tomeePath"`
+	JavaHome     string `json:"javaHome"`
 	HTTPPort     int    `json:"httpPort"`
 	DebugPort    int    `json:"debugPort"`
 	ShutdownPort int    `json:"shutdownPort"`

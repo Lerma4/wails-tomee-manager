@@ -2,6 +2,7 @@ package service
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"tomee-manager/backend/model"
@@ -23,7 +24,9 @@ func (s *StorageService) Init() error {
 		return err
 	}
 	dbPath := filepath.Join(appDataDir, "tomee-manager")
-	os.MkdirAll(dbPath, 0755)
+	if err := os.MkdirAll(dbPath, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory %s: %w", dbPath, err)
+	}
 	dbFile := filepath.Join(dbPath, "data.db")
 
 	db, err := sql.Open("sqlite", dbFile)
@@ -60,21 +63,24 @@ func (s *StorageService) createTables() error {
 		return err
 	}
 
+	// Migrate: add java_home column if missing
+	s.db.Exec(`ALTER TABLE config ADD COLUMN java_home TEXT DEFAULT ''`)
+
 	// Init default config if not exists
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO config (id, tomee_path, http_port, debug_port, shutdown_port) VALUES (1, '', 8080, 8000, 8005)`)
+	_, err := s.db.Exec(`INSERT OR IGNORE INTO config (id, tomee_path, java_home, http_port, debug_port, shutdown_port) VALUES (1, '', '', 8080, 8000, 8005)`)
 	return err
 }
 
 func (s *StorageService) SaveConfig(config model.Config) error {
-	_, err := s.db.Exec(`UPDATE config SET tomee_path=?, http_port=?, debug_port=?, shutdown_port=? WHERE id=1`,
-		config.TomEEPath, config.HTTPPort, config.DebugPort, config.ShutdownPort)
+	_, err := s.db.Exec(`UPDATE config SET tomee_path=?, java_home=?, http_port=?, debug_port=?, shutdown_port=? WHERE id=1`,
+		config.TomEEPath, config.JavaHome, config.HTTPPort, config.DebugPort, config.ShutdownPort)
 	return err
 }
 
 func (s *StorageService) LoadConfig() (model.Config, error) {
 	var config model.Config
-	row := s.db.QueryRow(`SELECT tomee_path, http_port, debug_port, shutdown_port FROM config WHERE id=1`)
-	err := row.Scan(&config.TomEEPath, &config.HTTPPort, &config.DebugPort, &config.ShutdownPort)
+	row := s.db.QueryRow(`SELECT tomee_path, java_home, http_port, debug_port, shutdown_port FROM config WHERE id=1`)
+	err := row.Scan(&config.TomEEPath, &config.JavaHome, &config.HTTPPort, &config.DebugPort, &config.ShutdownPort)
 	return config, err
 }
 

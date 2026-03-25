@@ -1,13 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ListWars, SaveConfig, SaveWar, DeleteWar } from '../../wailsjs/go/service/StorageService';
+import { ListWars, SaveWar, DeleteWar } from '../../wailsjs/go/service/StorageService';
 import { DeployAll as DeployAllWars } from '../../wailsjs/go/service/WarService';
 import { SelectWarFile } from '../../wailsjs/go/main/App';
 import { model } from '../../wailsjs/go/models';
-import { FaPlus, FaTrash, FaEdit, FaPlay } from 'react-icons/fa';
+import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen } from 'react-icons/fa';
 
 const WarManager: React.FC = () => {
     const [wars, setWars] = useState<model.WarArtifact[]>([]);
-    const [loading, setLoading] = useState(false);
     const [deploying, setDeploying] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
     const [currentWar, setCurrentWar] = useState<model.WarArtifact>(new model.WarArtifact());
@@ -16,9 +15,7 @@ const WarManager: React.FC = () => {
         ListWars().then((data) => setWars(data || [])).catch(console.error);
     };
 
-    useEffect(() => {
-        fetchWars();
-    }, []);
+    useEffect(() => { fetchWars(); }, []);
 
     const handleSave = async () => {
         try {
@@ -32,13 +29,11 @@ const WarManager: React.FC = () => {
     };
 
     const handleDelete = async (id: number) => {
-        if (!confirm('Are you sure?')) return;
+        if (!confirm('Are you sure you want to delete this WAR artifact?')) return;
         try {
             await DeleteWar(id);
             fetchWars();
-        } catch (err) {
-            console.error(err);
-        }
+        } catch (err) { console.error(err); }
     };
 
     const handleDeploy = async () => {
@@ -59,122 +54,166 @@ const WarManager: React.FC = () => {
     };
 
     return (
-        <div className="p-6">
-            <div className="flex justify-between items-center mb-6">
-                <h1 className="text-3xl font-bold">WAR Manager</h1>
+        <div className="p-6 page-enter">
+            {/* Header */}
+            <div className="flex justify-between items-start mb-6">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight">WAR Manager</h1>
+                    <p className="text-sm text-base-content/40 mt-1">Manage and deploy WAR artifacts</p>
+                </div>
                 <div className="flex gap-2">
-                    <button className="btn btn-primary" onClick={() => openModal()}>
+                    <button className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
                         {/* @ts-ignore */}
-                        <FaPlus /> Add WAR
+                        <FaPlus className="text-xs" /> Add WAR
                     </button>
-                    <button 
-                        className={`btn btn-secondary ${deploying ? 'loading' : ''}`} 
+                    <button
+                        className="btn btn-secondary btn-sm gap-2"
                         onClick={handleDeploy}
+                        disabled={deploying}
                     >
+                        {deploying && <span className="loading loading-spinner loading-xs" />}
                         {/* @ts-ignore */}
-                        <FaPlay /> Deploy All
+                        {!deploying && <FaRocket className="text-xs" />}
+                        Deploy All
                     </button>
                 </div>
             </div>
 
-            <div className="overflow-x-auto">
-                <table className="table w-full">
-                    <thead>
-                        <tr>
-                            <th>Enabled</th>
-                            <th>Source Path</th>
-                            <th>Destination Name</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {wars.map((war) => (
-                            <tr key={war.id}>
-                                <td>
-                                    <input 
-                                        type="checkbox" 
-                                        className="checkbox" 
-                                        checked={war.enabled} 
-                                        readOnly 
-                                    />
-                                </td>
-                                <td>{war.sourcePath}</td>
-                                <td>{war.destName}</td>
-                                <td className="flex gap-2">
-                                    <button className="btn btn-sm btn-ghost" onClick={() => openModal(war)}>
-                                        {/* @ts-ignore */}
-                                        <FaEdit />
-                                    </button>
-                                    <button className="btn btn-sm btn-ghost text-error" onClick={() => handleDelete(war.id)}>
-                                        {/* @ts-ignore */}
-                                        <FaTrash />
-                                    </button>
-                                </td>
+            {/* Table */}
+            <div className="panel overflow-hidden">
+                {wars.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-16 text-base-content/30">
+                        {/* @ts-ignore */}
+                        <FaBoxOpen className="text-4xl mb-3" />
+                        <p className="text-sm font-medium">No WAR artifacts configured</p>
+                        <p className="text-xs mt-1">Click "Add WAR" to get started</p>
+                    </div>
+                ) : (
+                    <table className="data-table w-full">
+                        <thead>
+                            <tr>
+                                <th className="w-20">Status</th>
+                                <th>Source Path</th>
+                                <th>Destination</th>
+                                <th className="w-24 text-right">Actions</th>
                             </tr>
-                        ))}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            {wars.map((war) => (
+                                <tr key={war.id}>
+                                    <td>
+                                        <input
+                                            type="checkbox"
+                                            className="checkbox checkbox-sm checkbox-primary"
+                                            checked={war.enabled}
+                                            readOnly
+                                        />
+                                    </td>
+                                    <td>
+                                        <span className="font-mono text-xs text-base-content/60 truncate block max-w-md">
+                                            {war.sourcePath}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span className="font-mono text-xs font-medium text-primary/80">
+                                            {war.destName}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div className="flex gap-1 justify-end">
+                                            <button
+                                                className="btn btn-ghost btn-xs"
+                                                onClick={() => openModal(war)}
+                                                title="Edit"
+                                            >
+                                                {/* @ts-ignore */}
+                                                <FaEdit />
+                                            </button>
+                                            <button
+                                                className="btn btn-ghost btn-xs text-error"
+                                                onClick={() => handleDelete(war.id)}
+                                                title="Delete"
+                                            >
+                                                {/* @ts-ignore */}
+                                                <FaTrash />
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
             </div>
 
             {/* Modal */}
             {modalOpen && (
-                <div className="modal modal-open">
-                    <div className="modal-box">
-                        <h3 className="font-bold text-lg">{currentWar.id ? 'Edit WAR' : 'Add WAR'}</h3>
-                        
-                        <div className="form-control w-full mt-4">
-                            <label className="label">
-                                <span className="label-text">Source Path</span>
-                            </label>
-                            <div className="flex gap-2">
-                                <input 
-                                    type="text" 
-                                    className="input input-bordered w-full" 
-                                    value={currentWar.sourcePath}
-                                    onChange={(e) => setCurrentWar({...currentWar, sourcePath: e.target.value})}
-                                />
-                                <button className="btn btn-square" onClick={async () => {
-                                    try {
-                                        const path = await SelectWarFile();
-                                        if (path) setCurrentWar({...currentWar, sourcePath: path});
-                                    } catch (e) {
-                                        console.error(e);
-                                    }
-                                }}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
-                                    </svg>
-                                </button>
+                <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-blur">
+                    <div className="panel p-6 w-full max-w-lg mx-4">
+                        <h3 className="text-lg font-bold tracking-tight mb-5">
+                            {currentWar.id ? 'Edit WAR Artifact' : 'Add WAR Artifact'}
+                        </h3>
+
+                        <div className="space-y-4">
+                            {/* Source Path */}
+                            <div>
+                                <label className="form-label">Source Path</label>
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        className="input input-bordered w-full font-mono text-sm"
+                                        placeholder="/path/to/artifact.war"
+                                        value={currentWar.sourcePath}
+                                        onChange={(e) => setCurrentWar({ ...currentWar, sourcePath: e.target.value })}
+                                    />
+                                    <button
+                                        className="btn btn-square btn-sm"
+                                        onClick={async () => {
+                                            try {
+                                                const path = await SelectWarFile();
+                                                if (path) setCurrentWar({ ...currentWar, sourcePath: path });
+                                            } catch (e) { console.error(e); }
+                                        }}
+                                        title="Browse"
+                                    >
+                                        {/* @ts-ignore */}
+                                        <FaFolder className="text-xs" />
+                                    </button>
+                                </div>
                             </div>
-                        </div>
 
-                        <div className="form-control w-full mt-4">
-                            <label className="label">
-                                <span className="label-text">Destination Name (e.g. app.war)</span>
-                            </label>
-                            <input 
-                                type="text" 
-                                className="input input-bordered w-full" 
-                                value={currentWar.destName}
-                                onChange={(e) => setCurrentWar({...currentWar, destName: e.target.value})}
-                            />
-                        </div>
-
-                        <div className="form-control w-full mt-4">
-                            <label className="label cursor-pointer">
-                                <span className="label-text">Enabled</span>
-                                <input 
-                                    type="checkbox" 
-                                    className="checkbox" 
-                                    checked={currentWar.enabled}
-                                    onChange={(e) => setCurrentWar({...currentWar, enabled: e.target.checked})}
+                            {/* Destination Name */}
+                            <div>
+                                <label className="form-label">Destination Name</label>
+                                <input
+                                    type="text"
+                                    className="input input-bordered w-full font-mono text-sm"
+                                    placeholder="app.war"
+                                    value={currentWar.destName}
+                                    onChange={(e) => setCurrentWar({ ...currentWar, destName: e.target.value })}
                                 />
+                            </div>
+
+                            {/* Enabled */}
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    className="checkbox checkbox-sm checkbox-primary"
+                                    checked={currentWar.enabled}
+                                    onChange={(e) => setCurrentWar({ ...currentWar, enabled: e.target.checked })}
+                                />
+                                <span className="text-sm font-medium">Enabled</span>
                             </label>
                         </div>
 
-                        <div className="modal-action">
-                            <button className="btn" onClick={() => setModalOpen(false)}>Cancel</button>
-                            <button className="btn btn-primary" onClick={handleSave}>Save</button>
+                        {/* Actions */}
+                        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-base-content/5">
+                            <button className="btn btn-ghost btn-sm" onClick={() => setModalOpen(false)}>
+                                Cancel
+                            </button>
+                            <button className="btn btn-primary btn-sm" onClick={handleSave}>
+                                Save
+                            </button>
                         </div>
                     </div>
                 </div>

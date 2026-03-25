@@ -1,39 +1,54 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { FaServer, FaCog, FaBoxOpen } from 'react-icons/fa';
+import Footer from './Footer';
+
+const navItems = [
+    { path: '/', label: 'Dashboard', icon: FaServer },
+    { path: '/wars', label: 'WAR Manager', icon: FaBoxOpen },
+    { path: '/config', label: 'Configuration', icon: FaCog },
+];
 
 const Sidebar: React.FC = () => {
     const location = useLocation();
 
-    const isActive = (path: string) => location.pathname === path ? 'active' : '';
-
     return (
-        <div className="h-full bg-base-200 text-base-content w-64 flex flex-col shrink-0">
-                <div className="p-4 text-2xl font-bold text-primary flex items-center gap-2">
+        <aside className="sidebar-nav h-full w-60 shrink-0 flex flex-col bg-base-200">
+            {/* Brand */}
+            <div className="px-5 py-5 flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
                     {/* @ts-ignore */}
-                    <FaServer /> TomEE Mgr
+                    <FaServer className="text-primary text-sm" />
                 </div>
-                <ul className="menu p-4 w-64 bg-base-200 text-base-content">
-                    <li>
-                        <Link to="/" className={isActive('/')}>
-                            {/* @ts-ignore */}
-                            <FaServer /> Dashboard
-                        </Link>
-                    </li>
-                    <li>
-                        <Link to="/wars" className={isActive('/wars')}>
-                            {/* @ts-ignore */}
-                            <FaBoxOpen /> WAR Manager
-                        </Link>
-                    </li>
-                    <li>
-                        <Link to="/config" className={isActive('/config')}>
-                            {/* @ts-ignore */}
-                            <FaCog /> Configuration
-                        </Link>
-                    </li>
+                <div>
+                    <h1 className="text-sm font-bold tracking-wide text-base-content">TomEE Manager</h1>
+                    <span className="text-[0.65rem] font-mono text-base-content/40 uppercase tracking-widest">ops console</span>
+                </div>
+            </div>
+
+            {/* Divider */}
+            <div className="mx-4 border-t border-base-content/5" />
+
+            {/* Navigation */}
+            <nav className="flex-1 px-3 py-4">
+                <ul className="menu gap-1 p-0">
+                    {navItems.map(({ path, label, icon: Icon }) => (
+                        <li key={path}>
+                            <Link
+                                to={path}
+                                className={location.pathname === path ? 'active' : ''}
+                            >
+                                {/* @ts-ignore */}
+                                <Icon className="text-[0.9rem]" />
+                                {label}
+                            </Link>
+                        </li>
+                    ))}
                 </ul>
-        </div>
+            </nav>
+
+            <Footer />
+        </aside>
     );
 };
 

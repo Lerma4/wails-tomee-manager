@@ -1,2 +1,251 @@
 @import "tailwindcss";
 @plugin "daisyui";
+
+/* ── Custom "Ops Console" Dark Theme ── */
+@plugin "daisyui/theme" {
+  name: "ops-console";
+  default: true;
+  prefersdark: true;
+  color-scheme: dark;
+
+  /* Base: deep navy-slate */
+  --color-base-100: oklch(18% 0.015 260);
+  --color-base-200: oklch(15% 0.012 260);
+  --color-base-300: oklch(12% 0.01 260);
+  --color-base-content: oklch(90% 0.008 260);
+
+  /* Primary: warm amber */
+  --color-primary: oklch(78% 0.16 75);
+  --color-primary-content: oklch(15% 0.03 75);
+
+  /* Secondary: cool teal */
+  --color-secondary: oklch(68% 0.12 195);
+  --color-secondary-content: oklch(98% 0.005 195);
+
+  /* Accent: bright cyan */
+  --color-accent: oklch(72% 0.14 210);
+  --color-accent-content: oklch(15% 0.02 210);
+
+  /* Neutral: mid slate */
+  --color-neutral: oklch(25% 0.015 260);
+  --color-neutral-content: oklch(80% 0.008 260);
+
+  /* Semantic */
+  --color-info: oklch(68% 0.15 240);
+  --color-info-content: oklch(98% 0.005 240);
+  --color-success: oklch(72% 0.17 155);
+  --color-success-content: oklch(15% 0.04 155);
+  --color-warning: oklch(82% 0.16 85);
+  --color-warning-content: oklch(18% 0.04 85);
+  --color-error: oklch(65% 0.22 25);
+  --color-error-content: oklch(98% 0.005 25);
+
+  /* Shape */
+  --radius-selector: 0.5rem;
+  --radius-field: 0.5rem;
+  --radius-box: 0.75rem;
+
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  --border: 1px;
+  --depth: 0;
+  --noise: 0;
+}
+
+/* ── Typography ── */
+@theme {
+  --font-sans: "Outfit", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── Global ── */
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: oklch(12% 0.01 260);
+  overflow: hidden;
+}
+
+/* ── Scrollbar Styling ── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(35% 0.015 260);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(45% 0.015 260);
+}
+
+/* ── Sidebar ── */
+.sidebar-nav {
+  border-right: 1px solid oklch(22% 0.015 260);
+}
+.sidebar-nav .menu li > a {
+  border-radius: 0.5rem;
+  padding: 0.65rem 1rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  letter-spacing: 0.01em;
+  color: oklch(65% 0.01 260);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sidebar-nav .menu li > a:hover {
+  background: oklch(20% 0.015 260);
+  color: oklch(85% 0.01 260);
+}
+.sidebar-nav .menu li > a.active {
+  background: oklch(78% 0.16 75 / 0.1);
+  color: oklch(78% 0.16 75);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 oklch(78% 0.16 75);
+}
+
+/* ── Cards ── */
+.panel {
+  background: oklch(18% 0.015 260);
+  border: 1px solid oklch(23% 0.015 260);
+  border-radius: 0.75rem;
+  transition: border-color 0.2s ease;
+}
+.panel:hover {
+  border-color: oklch(28% 0.015 260);
+}
+
+/* ── Terminal Log Viewer ── */
+.terminal {
+  background: oklch(10% 0.008 260);
+  border: 1px solid oklch(20% 0.015 260);
+  border-radius: 0.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow: hidden;
+}
+.terminal-header {
+  background: oklch(14% 0.012 260);
+  border-bottom: 1px solid oklch(20% 0.015 260);
+  padding: 0.5rem 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.terminal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.terminal-body {
+  padding: 0.75rem;
+  overflow-y: auto;
+  color: oklch(70% 0.04 155);
+}
+.terminal-body .log-line {
+  padding: 1px 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.terminal-body .log-line::before {
+  content: ">";
+  color: oklch(45% 0.02 260);
+  margin-right: 0.5rem;
+}
+.terminal-body .log-placeholder {
+  color: oklch(35% 0.01 260);
+  font-style: italic;
+}
+
+/* ── Status Indicator ── */
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot.running {
+  background: oklch(72% 0.17 155);
+  box-shadow: 0 0 8px oklch(72% 0.17 155 / 0.5);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+.status-dot.stopped {
+  background: oklch(45% 0.01 260);
+}
+.status-dot.unknown {
+  background: oklch(60% 0.12 85);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 6px oklch(72% 0.17 155 / 0.4); }
+  50% { box-shadow: 0 0 14px oklch(72% 0.17 155 / 0.7); }
+}
+
+/* ── Page Transitions ── */
+.page-enter {
+  animation: page-in 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Form Enhancements ── */
+.form-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: oklch(55% 0.01 260);
+  margin-bottom: 0.35rem;
+}
+
+/* ── Table Styling ── */
+.data-table th {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: oklch(50% 0.01 260);
+  border-bottom: 1px solid oklch(23% 0.015 260);
+  padding: 0.75rem 1rem;
+}
+.data-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid oklch(18% 0.015 260);
+  font-size: 0.875rem;
+  color: oklch(75% 0.008 260);
+}
+.data-table tr {
+  transition: background 0.15s ease;
+}
+.data-table tbody tr:hover {
+  background: oklch(20% 0.015 260);
+}
+
+/* ── Modal Backdrop ── */
+.modal-backdrop-blur {
+  backdrop-filter: blur(8px);
+  background: oklch(0% 0 0 / 0.6);
+}
+
+/* ── Button refinements ── */
+.btn {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
