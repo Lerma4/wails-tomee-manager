@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,6 +55,11 @@ func (s *TomEEService) startLocked() error {
 
 	if config.TomEEPath == "" {
 		return fmt.Errorf("tomee path not configured")
+	}
+
+	// Check that all required ports are free
+	if err := checkPortsFree(config); err != nil {
+		return err
 	}
 
 	// Update ports in server.xml
@@ -215,4 +221,28 @@ func (s *TomEEService) updateServerXml(config model.Config) error {
 	}
 
 	return doc.WriteToFile(serverXmlPath)
+}
+
+func checkPortsFree(config model.Config) error {
+	ports := map[string]int{
+		"HTTP":     config.HTTPPort,
+		"Shutdown": config.ShutdownPort,
+		"Debug":    config.DebugPort,
+	}
+	var busy []string
+	for name, port := range ports {
+		if port == 0 {
+			continue
+		}
+		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			busy = append(busy, fmt.Sprintf("%s port %d", name, port))
+		} else {
+			ln.Close()
+		}
+	}
+	if len(busy) > 0 {
+		return fmt.Errorf("the following ports are already in use: %s", strings.Join(busy, ", "))
+	}
+	return nil
 }
