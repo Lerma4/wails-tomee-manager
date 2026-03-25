@@ -8,7 +8,6 @@ build/
 *.dylib
 
 # Wails
-wails.json
 frontend/dist/
 frontend/wailsjs/
 
@@ -26,6 +25,12 @@ frontend/yarn-error.log
 .vscode/
 *.swp
 *.swo
+
+# Claude Code
+.claude/
+
+# Vite temp files
+*.timestamp-*.mjs
 
 # OS
 .DS_Store
