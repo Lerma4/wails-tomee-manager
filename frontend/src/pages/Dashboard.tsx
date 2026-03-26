@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Start, Stop, Restart } from '../../wailsjs/go/service/TomEEService';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { FaPlay, FaStop, FaRedo, FaCopy, FaCheck } from 'react-icons/fa';
 
-const Dashboard: React.FC = () => {
+const Dashboard = () => {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<'Running' | 'Stopped' | 'Unknown'>('Unknown');
     const [logs, setLogs] = useState<string[]>([]);
@@ -80,8 +80,7 @@ const Dashboard: React.FC = () => {
                             onClick={() => handleAction('Start', Start)}
                             disabled={loading || status === 'Running'}
                         >
-                            {/* @ts-ignore */}
-                            {loading ? <span className="loading loading-spinner loading-xs" /> : <FaPlay className="text-xs" />}
+{loading ? <span className="loading loading-spinner loading-xs" /> : <FaPlay className="text-xs" />}
                             Start
                         </button>
                         <button
@@ -89,8 +88,7 @@ const Dashboard: React.FC = () => {
                             onClick={() => handleAction('Stop', Stop)}
                             disabled={loading || status !== 'Running'}
                         >
-                            {/* @ts-ignore */}
-                            {loading ? <span className="loading loading-spinner loading-xs" /> : <FaStop className="text-xs" />}
+{loading ? <span className="loading loading-spinner loading-xs" /> : <FaStop className="text-xs" />}
                             Stop
                         </button>
                         <button
@@ -98,8 +96,7 @@ const Dashboard: React.FC = () => {
                             onClick={() => handleAction('Restart', Restart)}
                             disabled={loading || status !== 'Running'}
                         >
-                            {/* @ts-ignore */}
-                            {loading ? <span className="loading loading-spinner loading-xs" /> : <FaRedo className="text-xs" />}
+{loading ? <span className="loading loading-spinner loading-xs" /> : <FaRedo className="text-xs" />}
                             Restart
                         </button>
                     </div>
@@ -121,7 +118,7 @@ const Dashboard: React.FC = () => {
                         disabled={logs.length === 0}
                         title="Copy logs to clipboard"
                     >
-                        {copied ? <FaCheck className="text-success text-[0.6rem]" /> : <FaCopy className="text-[0.6rem]" />}
+{copied ? <FaCheck className="text-success text-[0.6rem]" /> : <FaCopy className="text-[0.6rem]" />}
                         {copied ? 'Copied' : 'Copy'}
                     </button>
                 </div>

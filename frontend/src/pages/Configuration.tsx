@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LoadConfig, SaveConfig } from '../../wailsjs/go/service/StorageService';
 import { SelectDirectory } from '../../wailsjs/go/main/App';
 import { model } from '../../wailsjs/go/models';
 import { FaFolder, FaSave } from 'react-icons/fa';
 
-const Configuration: React.FC = () => {
+const Configuration = () => {
     const [config, setConfig] = useState<model.Config>(new model.Config());
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState('');
@@ -55,8 +55,7 @@ const Configuration: React.FC = () => {
                     }}
                     title="Browse"
                 >
-                    {/* @ts-ignore */}
-                    <FaFolder className="text-xs" />
+<FaFolder className="text-xs" />
                 </button>
             </div>
         </div>
@@ -152,8 +151,7 @@ const Configuration: React.FC = () => {
                             disabled={loading}
                         >
                             {loading && <span className="loading loading-spinner loading-xs" />}
-                            {/* @ts-ignore */}
-                            {!loading && <FaSave className="text-xs" />}
+                {!loading && <FaSave className="text-xs" />}
                             Save Configuration
                         </button>
                     </div>

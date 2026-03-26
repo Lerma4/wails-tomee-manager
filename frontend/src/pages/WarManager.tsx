@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ListWars, SaveWar, DeleteWar } from '../../wailsjs/go/service/StorageService';
 import { DeployAll as DeployAllWars } from '../../wailsjs/go/service/WarService';
 import { SelectWarFile } from '../../wailsjs/go/main/App';
 import { model } from '../../wailsjs/go/models';
 import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen } from 'react-icons/fa';
 
-const WarManager: React.FC = () => {
+const WarManager = () => {
     const [wars, setWars] = useState<model.WarArtifact[]>([]);
     const [deploying, setDeploying] = useState(false);
     const [modalOpen, setModalOpen] = useState(false);
@@ -63,8 +63,7 @@ const WarManager: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                     <button className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
-                        {/* @ts-ignore */}
-                        <FaPlus className="text-xs" /> Add WAR
+<FaPlus className="text-xs" /> Add WAR
                     </button>
                     <button
                         className="btn btn-secondary btn-sm gap-2"
@@ -72,8 +71,7 @@ const WarManager: React.FC = () => {
                         disabled={deploying}
                     >
                         {deploying && <span className="loading loading-spinner loading-xs" />}
-                        {/* @ts-ignore */}
-                        {!deploying && <FaRocket className="text-xs" />}
+{!deploying && <FaRocket className="text-xs" />}
                         Deploy All
                     </button>
                 </div>
@@ -83,8 +81,7 @@ const WarManager: React.FC = () => {
             <div className="panel overflow-hidden">
                 {wars.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-base-content/30">
-                        {/* @ts-ignore */}
-                        <FaBoxOpen className="text-4xl mb-3" />
+<FaBoxOpen className="text-4xl mb-3" />
                         <p className="text-sm font-medium">No WAR artifacts configured</p>
                         <p className="text-xs mt-1">Click "Add WAR" to get started</p>
                     </div>
@@ -126,7 +123,6 @@ const WarManager: React.FC = () => {
                                                 onClick={() => openModal(war)}
                                                 title="Edit"
                                             >
-                                                {/* @ts-ignore */}
                                                 <FaEdit />
                                             </button>
                                             <button
@@ -134,7 +130,6 @@ const WarManager: React.FC = () => {
                                                 onClick={() => handleDelete(war.id)}
                                                 title="Delete"
                                             >
-                                                {/* @ts-ignore */}
                                                 <FaTrash />
                                             </button>
                                         </div>
@@ -176,8 +171,7 @@ const WarManager: React.FC = () => {
                                         }}
                                         title="Browse"
                                     >
-                                        {/* @ts-ignore */}
-                                        <FaFolder className="text-xs" />
+                                <FaFolder className="text-xs" />
                                     </button>
                                 </div>
                             </div>

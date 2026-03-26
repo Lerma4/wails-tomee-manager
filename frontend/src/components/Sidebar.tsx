@@ -1,4 +1,3 @@
-import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { FaServer, FaCog, FaBoxOpen } from 'react-icons/fa';
 import Footer from './Footer';
@@ -9,7 +8,7 @@ const navItems = [
     { path: '/config', label: 'Configuration', icon: FaCog },
 ];
 
-const Sidebar: React.FC = () => {
+const Sidebar = () => {
     const location = useLocation();
 
     return (
@@ -17,8 +16,7 @@ const Sidebar: React.FC = () => {
             {/* Brand */}
             <div className="px-5 py-5 flex items-center gap-3">
                 <div className="w-8 h-8 rounded-lg bg-primary/15 flex items-center justify-center">
-                    {/* @ts-ignore */}
-                    <FaServer className="text-primary text-sm" />
+<FaServer className="text-primary text-sm" />
                 </div>
                 <div>
                     <h1 className="text-sm font-bold tracking-wide text-base-content">TomEE Manager</h1>
@@ -38,8 +36,7 @@ const Sidebar: React.FC = () => {
                                 to={path}
                                 className={location.pathname === path ? 'active' : ''}
                             >
-                                {/* @ts-ignore */}
-                                <Icon className="text-[0.9rem]" />
+                        <Icon className="text-[0.9rem]" />
                                 {label}
                             </Link>
                         </li>
