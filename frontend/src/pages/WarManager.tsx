@@ -5,7 +5,7 @@ import { CheckWarExists, RunBuild } from '../../wailsjs/go/service/MavenService'
 import { SelectWarFile } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { model } from '../../wailsjs/go/models';
-import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen, FaSync, FaCheckCircle, FaTimesCircle, FaHammer } from 'react-icons/fa';
+import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen, FaSync, FaCheckCircle, FaTimesCircle, FaHammer, FaFileAlt } from 'react-icons/fa';
 
 type BuildState = 'idle' | 'building' | 'success' | 'error';
 
@@ -294,14 +294,26 @@ const WarManager = () => {
         }
 
         // idle
+        const hasLogs = (buildLogs[war.id] || []).length > 0;
         return (
-            <button
-                className="btn btn-ghost btn-xs"
-                onClick={() => handleBuild(war.id)}
-                title="Run Maven build"
-            >
-                <FaHammer />
-            </button>
+            <div className="flex gap-0.5 justify-center">
+                <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => handleBuild(war.id)}
+                    title="Run Maven build"
+                >
+                    <FaHammer />
+                </button>
+                {hasLogs && (
+                    <button
+                        className="btn btn-ghost btn-xs text-base-content/40"
+                        onClick={() => setLogModalWarId(war.id)}
+                        title="View last build log"
+                    >
+                        <FaFileAlt />
+                    </button>
+                )}
+            </div>
         );
     };
 
