@@ -1,9 +1,83 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ListWars, SaveWar, DeleteWar } from '../../wailsjs/go/service/StorageService';
 import { DeployAll as DeployAllWars } from '../../wailsjs/go/service/WarService';
+import { CheckWarExists, RunBuild } from '../../wailsjs/go/service/MavenService';
 import { SelectWarFile } from '../../wailsjs/go/main/App';
+import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { model } from '../../wailsjs/go/models';
-import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen } from 'react-icons/fa';
+import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen, FaSync, FaCheckCircle, FaTimesCircle, FaHammer } from 'react-icons/fa';
+
+type BuildState = 'idle' | 'building' | 'success' | 'error';
+
+/* ------------------------------------------------------------------ */
+/*  BuildLogModal                                                      */
+/* ------------------------------------------------------------------ */
+
+interface BuildLogModalProps {
+    warId: number;
+    wars: model.WarArtifact[];
+    buildStates: Record<number, BuildState>;
+    buildLogs: Record<number, string[]>;
+    onClose: () => void;
+}
+
+const BuildLogModal = ({ warId, wars, buildStates, buildLogs, onClose }: BuildLogModalProps) => {
+    const logsEndRef = useRef<HTMLDivElement>(null);
+    const war = wars.find((w) => w.id === warId);
+    const state = buildStates[warId] || 'idle';
+    const lines = buildLogs[warId] || [];
+
+    useEffect(() => {
+        logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [lines]);
+
+    const badgeClass =
+        state === 'building' ? 'badge-info' :
+        state === 'success'  ? 'badge-success' :
+        state === 'error'    ? 'badge-error' :
+        'badge-ghost';
+
+    const badgeLabel =
+        state === 'building' ? 'Building...' :
+        state === 'success'  ? 'Success' :
+        state === 'error'    ? 'Error' :
+        'Idle';
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-blur">
+            <div className="panel p-6 w-full max-w-3xl mx-4 flex flex-col" style={{ maxHeight: '80vh' }}>
+                {/* Header */}
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                        <h3 className="text-lg font-bold tracking-tight">
+                            Build Logs — {war?.destName || `WAR #${warId}`}
+                        </h3>
+                        <span className={`badge badge-sm ${badgeClass}`}>
+                            {state === 'building' && <span className="loading loading-spinner loading-xs mr-1" />}
+                            {badgeLabel}
+                        </span>
+                    </div>
+                    <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
+                </div>
+
+                {/* Log area */}
+                <div className="terminal-body flex-1 overflow-y-auto">
+                    {lines.length === 0 && (
+                        <div className="log-placeholder">Waiting for build output...</div>
+                    )}
+                    {lines.map((line, idx) => (
+                        <div key={idx} className="log-line">{line}</div>
+                    ))}
+                    <div ref={logsEndRef} />
+                </div>
+            </div>
+        </div>
+    );
+};
+
+/* ------------------------------------------------------------------ */
+/*  WarManager                                                         */
+/* ------------------------------------------------------------------ */
 
 const WarManager = () => {
     const [wars, setWars] = useState<model.WarArtifact[]>([]);
@@ -11,11 +85,97 @@ const WarManager = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [currentWar, setCurrentWar] = useState<model.WarArtifact>(new model.WarArtifact());
 
+    // Task 5 — WAR existence check
+    const [warExistsMap, setWarExistsMap] = useState<Record<number, boolean | null>>({});
+
+    // Task 6 — Maven build per-row
+    const [buildStates, setBuildStates] = useState<Record<number, BuildState>>({});
+    const [buildLogs, setBuildLogs] = useState<Record<number, string[]>>({});
+    const [logModalWarId, setLogModalWarId] = useState<number | null>(null);
+
+    /* ---------- WAR existence helpers ---------- */
+
+    const checkWarExists = (war: model.WarArtifact) => {
+        setWarExistsMap((prev) => ({ ...prev, [war.id]: null }));
+        CheckWarExists(war.sourcePath)
+            .then((exists) => setWarExistsMap((prev) => ({ ...prev, [war.id]: exists })))
+            .catch(() => setWarExistsMap((prev) => ({ ...prev, [war.id]: false })));
+    };
+
+    const checkAllWarExists = (warList: model.WarArtifact[]) => {
+        warList.forEach((w) => checkWarExists(w));
+    };
+
+    /* ---------- Fetch & lifecycle ---------- */
+
     const fetchWars = () => {
-        ListWars().then((data) => setWars(data || [])).catch(console.error);
+        ListWars()
+            .then((data) => {
+                const list = data || [];
+                setWars(list);
+                checkAllWarExists(list);
+            })
+            .catch(console.error);
     };
 
     useEffect(() => { fetchWars(); }, []);
+
+    /* ---------- Event listeners for Maven build ---------- */
+
+    const warsRef = useRef<model.WarArtifact[]>([]);
+    useEffect(() => { warsRef.current = wars; }, [wars]);
+
+    useEffect(() => {
+        const cleanups: (() => void)[] = [];
+
+        wars.forEach((war) => {
+            const cancelLog = EventsOn(`maven-log-${war.id}`, (line: string) => {
+                setBuildLogs((prev) => {
+                    const current = prev[war.id] || [];
+                    return { ...prev, [war.id]: [...current, line] };
+                });
+            });
+
+            const cancelDone = EventsOn(`maven-done-${war.id}`, (success: boolean) => {
+                const newState: BuildState = success ? 'success' : 'error';
+                setBuildStates((prev) => ({ ...prev, [war.id]: newState }));
+
+                // Re-check WAR existence for this artifact
+                const w = warsRef.current.find((x) => x.id === war.id);
+                if (w) checkWarExists(w);
+
+                // Reset to idle after 3 seconds
+                setTimeout(() => {
+                    setBuildStates((prev) => ({ ...prev, [war.id]: 'idle' }));
+                }, 3000);
+            });
+
+            cleanups.push(cancelLog, cancelDone);
+        });
+
+        return () => { cleanups.forEach((fn) => fn()); };
+    }, [wars]);
+
+    /* ---------- Build handler ---------- */
+
+    const handleBuild = async (warId: number) => {
+        setBuildStates((prev) => ({ ...prev, [warId]: 'building' }));
+        setBuildLogs((prev) => ({ ...prev, [warId]: [] }));
+        try {
+            await RunBuild(warId);
+        } catch (err) {
+            setBuildStates((prev) => ({ ...prev, [warId]: 'error' }));
+            setBuildLogs((prev) => ({
+                ...prev,
+                [warId]: [...(prev[warId] || []), `Build failed: ${err}`],
+            }));
+            setTimeout(() => {
+                setBuildStates((prev) => ({ ...prev, [warId]: 'idle' }));
+            }, 3000);
+        }
+    };
+
+    /* ---------- CRUD handlers ---------- */
 
     const handleSave = async () => {
         try {
@@ -53,6 +213,72 @@ const WarManager = () => {
         setModalOpen(true);
     };
 
+    /* ---------- Build column button ---------- */
+
+    const renderBuildButton = (war: model.WarArtifact) => {
+        const state = buildStates[war.id] || 'idle';
+
+        if (state === 'building') {
+            return (
+                <button
+                    className="btn btn-ghost btn-xs"
+                    onClick={() => setLogModalWarId(war.id)}
+                    title="View build logs"
+                >
+                    <span className="loading loading-spinner loading-xs" />
+                </button>
+            );
+        }
+        if (state === 'success') {
+            return (
+                <button
+                    className="btn btn-ghost btn-xs text-success"
+                    onClick={() => setLogModalWarId(war.id)}
+                    title="Build succeeded — click to view logs"
+                >
+                    <FaCheckCircle />
+                </button>
+            );
+        }
+        if (state === 'error') {
+            return (
+                <button
+                    className="btn btn-ghost btn-xs text-error"
+                    onClick={() => setLogModalWarId(war.id)}
+                    title="Build failed — click to view logs"
+                >
+                    <FaTimesCircle />
+                </button>
+            );
+        }
+
+        // idle
+        return (
+            <button
+                className="btn btn-ghost btn-xs"
+                onClick={() => handleBuild(war.id)}
+                title="Run Maven build"
+            >
+                <FaHammer />
+            </button>
+        );
+    };
+
+    /* ---------- WAR File existence indicator ---------- */
+
+    const renderWarExistsIndicator = (warId: number) => {
+        const exists = warExistsMap[warId];
+        if (exists === null || exists === undefined) {
+            return <span className="loading loading-spinner loading-xs" />;
+        }
+        if (exists) {
+            return <FaCheckCircle className="text-success" />;
+        }
+        return <FaTimesCircle className="text-error" />;
+    };
+
+    /* ---------- Render ---------- */
+
     return (
         <div className="p-6 page-enter">
             {/* Header */}
@@ -62,8 +288,15 @@ const WarManager = () => {
                     <p className="text-sm text-base-content/40 mt-1">Manage and deploy WAR artifacts</p>
                 </div>
                 <div className="flex gap-2">
+                    <button
+                        className="btn btn-ghost btn-sm gap-2"
+                        onClick={() => checkAllWarExists(wars)}
+                        title="Refresh WAR file status"
+                    >
+                        <FaSync className="text-xs" /> Refresh
+                    </button>
                     <button className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
-<FaPlus className="text-xs" /> Add WAR
+                        <FaPlus className="text-xs" /> Add WAR
                     </button>
                     <button
                         className="btn btn-secondary btn-sm gap-2"
@@ -71,7 +304,7 @@ const WarManager = () => {
                         disabled={deploying}
                     >
                         {deploying && <span className="loading loading-spinner loading-xs" />}
-{!deploying && <FaRocket className="text-xs" />}
+                        {!deploying && <FaRocket className="text-xs" />}
                         Deploy All
                     </button>
                 </div>
@@ -81,7 +314,7 @@ const WarManager = () => {
             <div className="panel overflow-hidden">
                 {wars.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-16 text-base-content/30">
-<FaBoxOpen className="text-4xl mb-3" />
+                        <FaBoxOpen className="text-4xl mb-3" />
                         <p className="text-sm font-medium">No WAR artifacts configured</p>
                         <p className="text-xs mt-1">Click "Add WAR" to get started</p>
                     </div>
@@ -91,7 +324,9 @@ const WarManager = () => {
                             <tr>
                                 <th className="w-20">Status</th>
                                 <th>Source Path</th>
+                                <th className="w-20 text-center">WAR File</th>
                                 <th>Destination</th>
+                                <th className="w-20 text-center">Build</th>
                                 <th className="w-24 text-right">Actions</th>
                             </tr>
                         </thead>
@@ -111,10 +346,16 @@ const WarManager = () => {
                                             {war.sourcePath}
                                         </span>
                                     </td>
+                                    <td className="text-center">
+                                        {renderWarExistsIndicator(war.id)}
+                                    </td>
                                     <td>
                                         <span className="font-mono text-xs font-medium text-primary/80">
                                             {war.destName}
                                         </span>
+                                    </td>
+                                    <td className="text-center">
+                                        {renderBuildButton(war)}
                                     </td>
                                     <td>
                                         <div className="flex gap-1 justify-end">
@@ -141,7 +382,7 @@ const WarManager = () => {
                 )}
             </div>
 
-            {/* Modal */}
+            {/* Add/Edit Modal */}
             {modalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop-blur">
                     <div className="panel p-6 w-full max-w-lg mx-4">
@@ -171,7 +412,7 @@ const WarManager = () => {
                                         }}
                                         title="Browse"
                                     >
-                                <FaFolder className="text-xs" />
+                                        <FaFolder className="text-xs" />
                                     </button>
                                 </div>
                             </div>
@@ -211,6 +452,17 @@ const WarManager = () => {
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* Build Log Modal */}
+            {logModalWarId !== null && (
+                <BuildLogModal
+                    warId={logModalWarId}
+                    wars={wars}
+                    buildStates={buildStates}
+                    buildLogs={buildLogs}
+                    onClose={() => setLogModalWarId(null)}
+                />
             )}
         </div>
     );
