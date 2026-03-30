@@ -64,7 +64,7 @@ func (s *MavenService) CheckWarExists(sourcePath string) bool {
 
 // RunBuild executes `mvn clean install` in the project root derived from the WAR's sourcePath.
 // Streams output via Wails events. Only one build per WAR ID at a time.
-func (s *MavenService) RunBuild(warID int) error {
+func (s *MavenService) RunBuild(warID int, profile string) error {
 	war, err := s.storage.GetWar(warID)
 	if err != nil {
 		return fmt.Errorf("WAR artifact not found: %w", err)
@@ -88,7 +88,11 @@ func (s *MavenService) RunBuild(warID int) error {
 		mvnCmd = "mvn"
 	}
 
-	cmd := exec.Command(mvnCmd, "clean", "install", "-DskipTests", "-Pdev")
+	args := []string{"clean", "install", "-DskipTests"}
+	if profile != "" {
+		args = append(args, "-P"+profile)
+	}
+	cmd := exec.Command(mvnCmd, args...)
 	cmd.Dir = projectRoot
 	cmd.Env = os.Environ()
 

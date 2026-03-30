@@ -85,6 +85,9 @@ const WarManager = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [currentWar, setCurrentWar] = useState<model.WarArtifact>(new model.WarArtifact());
 
+    // Maven profile
+    const [mavenProfile, setMavenProfile] = useState('dev');
+
     // Task 5 — WAR existence check
     const [warExistsMap, setWarExistsMap] = useState<Record<number, boolean | null>>({});
 
@@ -198,7 +201,7 @@ const WarManager = () => {
         setBuildStates((prev) => ({ ...prev, [warId]: 'building' }));
         setBuildLogs((prev) => ({ ...prev, [warId]: [] }));
         try {
-            await RunBuild(warId);
+            await RunBuild(warId, mavenProfile);
         } catch (err) {
             setBuildStates((prev) => ({ ...prev, [warId]: 'error' }));
             setBuildLogs((prev) => ({
@@ -360,6 +363,16 @@ const WarManager = () => {
                             : <FaSync className="text-xs" />}
                         Refresh
                     </button>
+                    <div className="flex items-center gap-1">
+                        <label className="text-xs text-base-content/40">Profile:</label>
+                        <input
+                            type="text"
+                            className="input input-bordered input-sm font-mono text-xs w-24"
+                            value={mavenProfile}
+                            onChange={(e) => setMavenProfile(e.target.value)}
+                            placeholder="dev"
+                        />
+                    </div>
                     <button className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
                         <FaPlus className="text-xs" /> Add WAR
                     </button>
