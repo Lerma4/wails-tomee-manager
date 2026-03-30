@@ -92,6 +92,8 @@ const WarManager = () => {
     const [buildStates, setBuildStates] = useState<Record<number, BuildState>>({});
     const [buildLogs, setBuildLogs] = useState<Record<number, string[]>>({});
     const [logModalWarId, setLogModalWarId] = useState<number | null>(null);
+    const [refreshing, setRefreshing] = useState(false);
+    const buildTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
     /* ---------- WAR existence helpers ---------- */
 
@@ -125,35 +127,65 @@ const WarManager = () => {
     const warsRef = useRef<model.WarArtifact[]>([]);
     useEffect(() => { warsRef.current = wars; }, [wars]);
 
-    useEffect(() => {
-        const cleanups: (() => void)[] = [];
+    const activeListeners = useRef<Map<number, () => void>>(new Map());
 
+    useEffect(() => {
+        const currentIds = new Set(wars.map((w) => w.id));
+        const registeredIds = activeListeners.current;
+
+        // Register listeners for new WAR IDs
         wars.forEach((war) => {
+            if (registeredIds.has(war.id)) return;
+
             const cancelLog = EventsOn(`maven-log-${war.id}`, (line: string) => {
-                setBuildLogs((prev) => {
-                    const current = prev[war.id] || [];
-                    return { ...prev, [war.id]: [...current, line] };
-                });
+                setBuildLogs((prev) => ({
+                    ...prev,
+                    [war.id]: [...(prev[war.id] || []), line],
+                }));
             });
 
-            const cancelDone = EventsOn(`maven-done-${war.id}`, (success: boolean) => {
-                const newState: BuildState = success ? 'success' : 'error';
+            const cancelDone = EventsOn(`maven-done-${war.id}`, (result: { success: boolean; error: string }) => {
+                const newState: BuildState = result.success ? 'success' : 'error';
                 setBuildStates((prev) => ({ ...prev, [war.id]: newState }));
+
+                if (!result.success && result.error) {
+                    setBuildLogs((prev) => ({
+                        ...prev,
+                        [war.id]: [...(prev[war.id] || []), `BUILD FAILED: ${result.error}`],
+                    }));
+                }
 
                 // Re-check WAR existence for this artifact
                 const w = warsRef.current.find((x) => x.id === war.id);
                 if (w) checkWarExists(w);
 
                 // Reset to idle after 3 seconds
-                setTimeout(() => {
+                const prev = buildTimers.current.get(war.id);
+                if (prev) clearTimeout(prev);
+                const timer = setTimeout(() => {
                     setBuildStates((prev) => ({ ...prev, [war.id]: 'idle' }));
+                    buildTimers.current.delete(war.id);
                 }, 3000);
+                buildTimers.current.set(war.id, timer);
             });
 
-            cleanups.push(cancelLog, cancelDone);
+            registeredIds.set(war.id, () => { cancelLog(); cancelDone(); });
         });
 
-        return () => { cleanups.forEach((fn) => fn()); };
+        // Unregister listeners for removed WAR IDs
+        registeredIds.forEach((cleanup, id) => {
+            if (!currentIds.has(id)) {
+                cleanup();
+                registeredIds.delete(id);
+            }
+        });
+
+        return () => {
+            registeredIds.forEach((cleanup) => cleanup());
+            registeredIds.clear();
+            buildTimers.current.forEach((timer) => clearTimeout(timer));
+            buildTimers.current.clear();
+        };
     }, [wars]);
 
     /* ---------- Build handler ---------- */
@@ -169,9 +201,13 @@ const WarManager = () => {
                 ...prev,
                 [warId]: [...(prev[warId] || []), `Build failed: ${err}`],
             }));
-            setTimeout(() => {
-                setBuildStates((prev) => ({ ...prev, [warId]: 'idle' }));
+            const prev = buildTimers.current.get(warId);
+            if (prev) clearTimeout(prev);
+            const timer = setTimeout(() => {
+                setBuildStates((p) => ({ ...p, [warId]: 'idle' }));
+                buildTimers.current.delete(warId);
             }, 3000);
+            buildTimers.current.set(warId, timer);
         }
     };
 
@@ -192,6 +228,7 @@ const WarManager = () => {
         if (!confirm('Are you sure you want to delete this WAR artifact?')) return;
         try {
             await DeleteWar(id);
+            if (logModalWarId === id) setLogModalWarId(null);
             fetchWars();
         } catch (err) { console.error(err); }
     };
@@ -290,10 +327,22 @@ const WarManager = () => {
                 <div className="flex gap-2">
                     <button
                         className="btn btn-ghost btn-sm gap-2"
-                        onClick={() => checkAllWarExists(wars)}
+                        onClick={async () => {
+                            setRefreshing(true);
+                            await Promise.all(wars.map((w) =>
+                                CheckWarExists(w.sourcePath)
+                                    .then((exists) => setWarExistsMap((prev) => ({ ...prev, [w.id]: exists })))
+                                    .catch(() => setWarExistsMap((prev) => ({ ...prev, [w.id]: false })))
+                            ));
+                            setRefreshing(false);
+                        }}
+                        disabled={refreshing}
                         title="Refresh WAR file status"
                     >
-                        <FaSync className="text-xs" /> Refresh
+                        {refreshing
+                            ? <span className="loading loading-spinner loading-xs" />
+                            : <FaSync className="text-xs" />}
+                        Refresh
                     </button>
                     <button className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
                         <FaPlus className="text-xs" /> Add WAR
@@ -407,7 +456,7 @@ const WarManager = () => {
                                         onClick={async () => {
                                             try {
                                                 const path = await SelectWarFile();
-                                                if (path) setCurrentWar({ ...currentWar, sourcePath: path });
+                                                if (path) setCurrentWar((prev) => ({ ...prev, sourcePath: path }));
                                             } catch (e) { console.error(e); }
                                         }}
                                         title="Browse"
