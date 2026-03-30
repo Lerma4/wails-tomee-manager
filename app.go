@@ -12,12 +12,14 @@ import (
 type App struct {
 	ctx          context.Context
 	tomeeService *service.TomEEService
+	mavenService *service.MavenService
 }
 
 // NewApp creates a new App application struct
-func NewApp(tomeeService *service.TomEEService) *App {
+func NewApp(tomeeService *service.TomEEService, mavenService *service.MavenService) *App {
 	return &App{
 		tomeeService: tomeeService,
+		mavenService: mavenService,
 	}
 }
 
@@ -26,6 +28,7 @@ func NewApp(tomeeService *service.TomEEService) *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.tomeeService.SetContext(ctx)
+	a.mavenService.SetContext(ctx)
 }
 
 // Greet returns a greeting for the given name

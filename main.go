@@ -22,9 +22,10 @@ func main() {
 
 	tomeeService := service.NewTomEEService(storageService)
 	warService := service.NewWarService(storageService)
+	mavenService := service.NewMavenService(storageService)
 
 	// Create an instance of the app structure
-	app := NewApp(tomeeService)
+	app := NewApp(tomeeService, mavenService)
 
 	// Create application with options
 	err := wails.Run(&options.App{
@@ -41,6 +42,7 @@ func main() {
 			storageService,
 			tomeeService,
 			warService,
+			mavenService,
 		},
 	})
 
