@@ -129,6 +129,7 @@ const WarManager = () => {
 
     const activeListeners = useRef<Map<number, () => void>>(new Map());
 
+    // Incremental listener management: register new, unregister removed
     useEffect(() => {
         const currentIds = new Set(wars.map((w) => w.id));
         const registeredIds = activeListeners.current;
@@ -160,8 +161,8 @@ const WarManager = () => {
                 if (w) checkWarExists(w);
 
                 // Reset to idle after 3 seconds
-                const prev = buildTimers.current.get(war.id);
-                if (prev) clearTimeout(prev);
+                const prevTimer = buildTimers.current.get(war.id);
+                if (prevTimer) clearTimeout(prevTimer);
                 const timer = setTimeout(() => {
                     setBuildStates((prev) => ({ ...prev, [war.id]: 'idle' }));
                     buildTimers.current.delete(war.id);
@@ -179,14 +180,17 @@ const WarManager = () => {
                 registeredIds.delete(id);
             }
         });
+    }, [wars]);
 
+    // Full teardown on unmount only
+    useEffect(() => {
         return () => {
-            registeredIds.forEach((cleanup) => cleanup());
-            registeredIds.clear();
+            activeListeners.current.forEach((cleanup) => cleanup());
+            activeListeners.current.clear();
             buildTimers.current.forEach((timer) => clearTimeout(timer));
             buildTimers.current.clear();
         };
-    }, [wars]);
+    }, []);
 
     /* ---------- Build handler ---------- */
 
