@@ -37,7 +37,7 @@ func (s *MavenService) FindProjectRoot(sourcePath string) (string, error) {
 	dir := filepath.Dir(sourcePath)
 	const maxLevels = 10
 
-	for i := 0; i < maxLevels; i++ {
+	for range maxLevels {
 		pomPath := filepath.Join(dir, "pom.xml")
 		if _, err := os.Stat(pomPath); err == nil {
 			return dir, nil
@@ -142,7 +142,7 @@ func (s *MavenService) RunBuild(warID int) error {
 		waitErr := cmd.Wait()
 		s.removeBuild(warID)
 
-		result := map[string]interface{}{
+		result := map[string]any{
 			"success": waitErr == nil,
 			"error":   "",
 		}
