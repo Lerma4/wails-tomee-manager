@@ -101,6 +101,13 @@ func (s *StorageService) DeleteWar(id int) error {
 	return err
 }
 
+func (s *StorageService) GetWar(id int) (model.WarArtifact, error) {
+	var war model.WarArtifact
+	row := s.db.QueryRow(`SELECT id, source_path, dest_name, enabled FROM wars WHERE id=?`, id)
+	err := row.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled)
+	return war, err
+}
+
 func (s *StorageService) ListWars() ([]model.WarArtifact, error) {
 	rows, err := s.db.Query(`SELECT id, source_path, dest_name, enabled FROM wars`)
 	if err != nil {
