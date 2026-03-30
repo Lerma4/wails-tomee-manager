@@ -88,7 +88,7 @@ func (s *MavenService) RunBuild(warID int) error {
 		mvnCmd = "mvn"
 	}
 
-	cmd := exec.Command(mvnCmd, "clean", "install")
+	cmd := exec.Command(mvnCmd, "clean", "install", "-DskipTests", "-Pdev")
 	cmd.Dir = projectRoot
 	cmd.Env = os.Environ()
 
