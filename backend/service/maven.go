@@ -112,7 +112,7 @@ func (s *MavenService) RunBuild(warID int, profile string) error {
 	if profile != "" {
 		args = append(args, "-P"+profile)
 	}
-	cmd := exec.Command(mvnCmd, args...)
+	cmd := command(mvnCmd, args...)
 	cmd.Dir = projectDir
 	cmd.Env = os.Environ()
 
