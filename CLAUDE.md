@@ -18,24 +18,57 @@ wails dev          # Run in live development mode (starts both Go backend and Vi
 wails build        # Build production binary (output: tomee-mananger.exe)
 ```
 
-### Verify
+### Verify — ALWAYS run before considering any change done
+
+Every code change must pass all four. No exceptions, no "it's a small change".
+
 ```bash
-go build ./...     # Quick compile check (no tests exist yet)
+go tool golangci-lint run ./...     # Go linter (config: .golangci.yml)
+go test ./...                       # Go tests
+cd frontend && npm run lint         # Biome linter (config: frontend/biome.json)
+cd frontend && npm run build        # tsc typecheck + Vite production build
 ```
+
+Both linters are at **zero findings**. Keep them there — never commit with a
+new finding, and never silence one by loosening the config. If a rule is truly
+wrong for a specific line, add an inline ignore with a real reason:
+
+```go
+_ = os.Chmod(binPath, 0755) // best effort: script may already be executable
+```
+```tsx
+// biome-ignore lint/correctness/useExhaustiveDependencies: <why this is deliberate>
+```
+
+Autofix helpers: `go tool golangci-lint fmt ./...` (Go formatting),
+`npm run lint:fix` (Biome safe fixes only).
 
 ### Frontend only (from frontend/ directory)
 ```bash
 npm install        # Install frontend dependencies
 npm run dev        # Vite dev server only
+npm run lint       # Biome linter
+npm run typecheck  # tsc --noEmit
 npm run build      # TypeScript check + Vite production build
 ```
+
+### Linters
+
+- **Go**: `golangci-lint` v2, pinned as a Go tool dependency in `go.mod` (no
+  separate install — `go tool golangci-lint` just works). Standard linter set:
+  `errcheck`, `govet`, `ineffassign`, `staticcheck`, `unused`, plus `gofmt`.
+- **Frontend**: `biome` (single devDependency, lint only — the formatter is
+  deliberately disabled so existing code style is left alone). Scoped to
+  `frontend/src/**`; generated `wailsjs/` bindings are excluded.
+- `.gitattributes` forces LF on `*.go` — without it `core.autocrlf` makes every
+  checked-out Go file look "unformatted" to gofmt on Windows.
 
 ## Architecture
 
 ### Backend (Go)
 
 - **main.go** — Wails app entry point. Initializes services, binds them to the frontend, and embeds `frontend/dist` via `//go:embed`.
-- **app.go** — `App` struct with Wails lifecycle (`startup`) and native dialog helpers (`SelectDirectory`, `SelectWarFile`).
+- **app.go** — `App` struct with Wails lifecycle (`startup`) and native dialog helpers (`SelectDirectory`, `SelectProjectDir`).
 - **backend/service/storage.go** — `StorageService`: SQLite persistence (via `modernc.org/sqlite`, pure Go, no CGO). Database stored at `os.UserConfigDir()/tomee-manager/data.db`. Manages `config` (singleton row) and `wars` tables.
 - **backend/service/tomee.go** — `TomEEService`: Start/Stop/Restart TomEE via `catalina.bat`/`catalina.sh`. Modifies `server.xml` ports using `etree` XML library. Streams stdout/stderr logs to frontend via Wails events (`tomee-log`).
 - **backend/service/war.go** — `WarService`: Copies enabled WAR artifacts to TomEE's `webapps/` directory.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { LoadConfig, SaveConfig } from '../../wailsjs/go/service/StorageService';
 import { SelectDirectory } from '../../wailsjs/go/main/App';
 import { model } from '../../wailsjs/go/models';
@@ -17,15 +17,15 @@ const Configuration = () => {
         setLoading(true);
         try {
             const cfg = { ...config };
-            cfg.httpPort = parseInt(cfg.httpPort as any);
-            cfg.debugPort = parseInt(cfg.debugPort as any);
-            cfg.shutdownPort = parseInt(cfg.shutdownPort as any);
+            cfg.httpPort = Number(cfg.httpPort);
+            cfg.debugPort = Number(cfg.debugPort);
+            cfg.shutdownPort = Number(cfg.shutdownPort);
 
             await SaveConfig(cfg);
             setMessage('Configuration saved successfully!');
             setTimeout(() => setMessage(''), 3000);
-        } catch (err: any) {
-            setMessage('Error saving config: ' + err);
+        } catch (err) {
+            setMessage(`Error saving config: ${err}`);
         } finally {
             setLoading(false);
         }
@@ -34,18 +34,21 @@ const Configuration = () => {
     const DirectoryField = ({ label, placeholder, value, onChange }: {
         label: string; placeholder: string; value: string;
         onChange: (val: string) => void;
-    }) => (
+    }) => {
+        const fieldId = useId();
+        return (
         <div>
-            <label className="form-label">{label}</label>
+            <label className="form-label" htmlFor={fieldId}>{label}</label>
             <div className="flex gap-2">
                 <input
+                    id={fieldId}
                     type="text"
                     placeholder={placeholder}
                     className="input input-bordered w-full font-mono text-sm"
                     value={value}
                     onChange={(e) => onChange(e.target.value)}
                 />
-                <button
+                <button type="button"
                     className="btn btn-square btn-sm"
                     onClick={async () => {
                         try {
@@ -59,7 +62,8 @@ const Configuration = () => {
                 </button>
             </div>
         </div>
-    );
+        );
+    };
 
     return (
         <div className="p-6 page-enter">
@@ -102,30 +106,33 @@ const Configuration = () => {
                         </h2>
                         <div className="grid grid-cols-3 gap-4">
                             <div>
-                                <label className="form-label">HTTP Port</label>
+                                <label className="form-label" htmlFor="http-port">HTTP Port</label>
                                 <input
+                                    id="http-port"
                                     type="number"
                                     className="input input-bordered w-full font-mono text-sm"
                                     value={config.httpPort}
-                                    onChange={(e) => setConfig({ ...config, httpPort: parseInt(e.target.value) })}
+                                    onChange={(e) => setConfig({ ...config, httpPort: parseInt(e.target.value, 10) })}
                                 />
                             </div>
                             <div>
-                                <label className="form-label">Debug Port</label>
+                                <label className="form-label" htmlFor="debug-port">Debug Port</label>
                                 <input
+                                    id="debug-port"
                                     type="number"
                                     className="input input-bordered w-full font-mono text-sm"
                                     value={config.debugPort}
-                                    onChange={(e) => setConfig({ ...config, debugPort: parseInt(e.target.value) })}
+                                    onChange={(e) => setConfig({ ...config, debugPort: parseInt(e.target.value, 10) })}
                                 />
                             </div>
                             <div>
-                                <label className="form-label">Shutdown Port</label>
+                                <label className="form-label" htmlFor="shutdown-port">Shutdown Port</label>
                                 <input
+                                    id="shutdown-port"
                                     type="number"
                                     className="input input-bordered w-full font-mono text-sm"
                                     value={config.shutdownPort}
-                                    onChange={(e) => setConfig({ ...config, shutdownPort: parseInt(e.target.value) })}
+                                    onChange={(e) => setConfig({ ...config, shutdownPort: parseInt(e.target.value, 10) })}
                                 />
                             </div>
                         </div>
@@ -145,7 +152,7 @@ const Configuration = () => {
                                 </span>
                             )}
                         </div>
-                        <button
+                        <button type="button"
                             className="btn btn-primary btn-sm gap-2"
                             onClick={handleSave}
                             disabled={loading}

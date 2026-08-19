@@ -63,8 +63,8 @@ func (s *StorageService) createTables() error {
 		return err
 	}
 
-	// Migrate: add java_home column if missing
-	s.db.Exec(`ALTER TABLE config ADD COLUMN java_home TEXT DEFAULT ''`)
+	// Migrate: add java_home column if missing (errors when it already exists)
+	_, _ = s.db.Exec(`ALTER TABLE config ADD COLUMN java_home TEXT DEFAULT ''`)
 
 	// Init default config if not exists
 	_, err := s.db.Exec(`INSERT OR IGNORE INTO config (id, tomee_path, java_home, http_port, debug_port, shutdown_port) VALUES (1, '', '', 8080, 8000, 8005)`)

@@ -1,0 +1,5 @@
+# Go tooling (gofmt, golangci-lint) requires LF; keep it that way in the working
+# copy too, otherwise core.autocrlf makes every checked-out .go file "unformatted".
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
