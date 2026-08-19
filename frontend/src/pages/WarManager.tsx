@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ListWars, SaveWar, DeleteWar } from '../../wailsjs/go/service/StorageService';
+import { ListWars, SaveWar, DeleteWar, LoadConfig } from '../../wailsjs/go/service/StorageService';
 import { DeployAll as DeployAllWars, DeploySingle, IsDeployed, Undeploy } from '../../wailsjs/go/service/WarService';
 import { Restart } from '../../wailsjs/go/service/TomEEService';
 import { CheckWarExists, RunBuild } from '../../wailsjs/go/service/MavenService';
@@ -30,6 +30,27 @@ type DeployMode = keyof typeof DEPLOY_MODES;
 
 const deployModeOf = (war: model.WarArtifact): DeployMode =>
     (war.deployMode in DEPLOY_MODES ? war.deployMode : 'copy') as DeployMode;
+
+/**
+ * Preview of the context Tomcat will use. contextName() in
+ * backend/service/instance.go is the authority; this only mirrors it so the
+ * URL can be shown while typing.
+ */
+const contextPreview = (value: string): string => {
+    let name = value.trim().replace(/\\/g, '/');
+    name = name.replace(/^\/+|\/+$/g, '');
+    if (/\.war$/i.test(name)) name = name.slice(0, -4);
+    name = name.replace(/^\/+|\/+$/g, '');
+    if (name === '' || name.toUpperCase() === 'ROOT') return '';
+    return name.replace(/\//g, '#');
+};
+
+/** The path segment to display for an artifact: what it is deployed as if it
+ *  has been deployed, otherwise what the configured value will become. */
+const contextUrlPath = (war: model.WarArtifact): string => {
+    const name = war.deployedAs || contextPreview(war.destName || '');
+    return name.toUpperCase() === 'ROOT' ? '' : name;
+};
 
 /** Stages of the Build to Deploy to Restart chain, or '' when idle. */
 type ChainStage = '' | 'building' | 'deploying' | 'restarting';
@@ -150,6 +171,9 @@ const WarManager = () => {
     // Maven profile
     const [mavenProfile, setMavenProfile] = useState('dev');
 
+    // Only used to render the URL an artifact will answer on.
+    const [httpPort, setHttpPort] = useState(8080);
+
     // Task 5 — WAR existence check
     const [warExistsMap, setWarExistsMap] = useState<Record<number, boolean | null>>({});
     const [deployedMap, setDeployedMap] = useState<Record<number, boolean | null>>({});
@@ -205,6 +229,12 @@ const WarManager = () => {
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: initial load only; fetchWars is re-created every render
     useEffect(() => { fetchWars(); }, []);
+
+    useEffect(() => {
+        LoadConfig()
+            .then((cfg) => { if (cfg.httpPort) setHttpPort(cfg.httpPort); })
+            .catch(console.error);
+    }, []);
 
     /* ---------- Build to Deploy to Restart chain ---------- */
 
@@ -601,7 +631,11 @@ const WarManager = () => {
                                         <span>WAR File</span>
                                     </Hint>
                                 </th>
-                                <th>Destination</th>
+                                <th>
+                                    <Hint tip="The URL path the app answers on — independent of the .war file name" side="right">
+                                        <span>Context</span>
+                                    </Hint>
+                                </th>
                                 <th className="w-24 text-center">Mode</th>
                                 <th className="w-20 text-center">Build</th>
                                 <th className="w-32 text-right">Actions</th>
@@ -628,7 +662,7 @@ const WarManager = () => {
                                     </td>
                                     <td>
                                         <span className="font-mono text-xs font-medium text-primary/80">
-                                            {war.destName}
+                                            /{contextUrlPath(war)}
                                         </span>
                                         {renderDeployedIndicator(war.id)}
                                     </td>
@@ -736,17 +770,29 @@ const WarManager = () => {
                                 </div>
                             </div>
 
-                            {/* Destination Name */}
+                            {/* Context path */}
                             <div>
-                                <label className="form-label" htmlFor="war-dest-name">Destination Name</label>
+                                <label className="form-label" htmlFor="war-dest-name">Context path</label>
                                 <input
                                     id="war-dest-name"
                                     type="text"
                                     className="input input-bordered w-full font-mono text-sm"
-                                    placeholder="app.war"
+                                    placeholder="/commerciale"
                                     value={currentWar.destName}
                                     onChange={(e) => setCurrentWar({ ...currentWar, destName: e.target.value })}
                                 />
+                                <p className="text-xs text-base-content/40 mt-1">
+                                    Served at{' '}
+                                    <span className="font-mono text-base-content/70">
+                                        http://localhost:{httpPort}/{contextPreview(currentWar.destName || '')}
+                                    </span>
+                                    . Use <span className="font-mono">/</span> for the root context.
+                                </p>
+                                <p className="text-xs text-base-content/40 mt-1">
+                                    {deployModeOf(currentWar) === 'copy'
+                                        ? 'In Copy mode Tomcat takes the context from the file name, so the copy in webapps/ is renamed to match this path.'
+                                        : 'The built .war keeps its own name — only the context descriptor is named after this path.'}
+                                </p>
                             </div>
 
                             {/* Deploy Mode */}

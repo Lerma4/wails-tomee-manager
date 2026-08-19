@@ -100,18 +100,29 @@ func contextDir(base string) string {
 	return filepath.Join(base, "conf", "Catalina", "localhost")
 }
 
-// contextName maps a deployment name to the descriptor file name Tomcat looks
-// for: "logistico.war" -> "logistico", "" -> "ROOT". Nested contexts use
-// Tomcat's own "a#b.war" spelling, which needs no translation here.
+// contextName maps whatever the user typed as a context path to the name
+// Tomcat identifies the context by — the descriptor file name, and the file
+// name under webapps/ when the artifact is copied there.
+//
+// The artifact keeps its own name regardless: a descriptor called
+// commerciale.xml can point at CommercialePlus.war, which is how one project
+// gets served under a different URL.
+//
+//	"/commerciale"  -> "commerciale"
+//	"logistico.war" -> "logistico"
+//	"/" or ""       -> "ROOT"
+//	"api/v1"        -> "api#v1"   (Tomcat's spelling for a nested path)
 func contextName(destName string) string {
 	name := strings.TrimSpace(destName)
+	name = strings.Trim(strings.ReplaceAll(name, `\`, "/"), "/")
 	if len(name) >= 4 && strings.EqualFold(name[len(name)-4:], ".war") {
 		name = name[:len(name)-4]
 	}
+	name = strings.Trim(name, "/")
 	if name == "" || strings.EqualFold(name, "ROOT") {
 		return "ROOT"
 	}
-	return name
+	return strings.ReplaceAll(name, "/", "#")
 }
 
 func contextFile(base, destName string) string {

@@ -50,6 +50,13 @@ func TestContextName(t *testing.T) {
 		"":                "ROOT",
 		"  spaced.war  ":  "spaced",
 		"manager#foo.war": "manager#foo",
+		// Context paths as a person would actually write them.
+		"/commerciale":     "commerciale",
+		"/commerciale.war": "commerciale",
+		"/":                "ROOT",
+		"api/v1":           "api#v1",
+		"/api/v1/":         "api#v1",
+		`\commerciale`:     "commerciale",
 	}
 	for in, want := range cases {
 		if got := contextName(in); got != want {
@@ -58,16 +65,109 @@ func TestContextName(t *testing.T) {
 	}
 }
 
-func TestValidateDestNameRejectsEscapes(t *testing.T) {
-	for _, bad := range []string{"", "   ", "../evil.war", `..\evil.war`, "sub/app.war", `sub\app.war`} {
-		if err := validateDestName(bad); err == nil {
-			t.Errorf("validateDestName(%q) = nil; want error", bad)
+func TestValidateContextPath(t *testing.T) {
+	for _, bad := range []string{"", "   ", "../evil.war", `..\evil.war`, "a/../b", "bad:name", "q?x", `quo"te`} {
+		if err := validateContextPath(bad); err == nil {
+			t.Errorf("validateContextPath(%q) = nil; want error", bad)
 		}
 	}
-	for _, ok := range []string{"app.war", "ROOT.war", "manager#foo.war", "NoExtension"} {
-		if err := validateDestName(ok); err != nil {
-			t.Errorf("validateDestName(%q) = %v; want nil", ok, err)
+	// Slashes are how a context path is normally written, so they must pass.
+	for _, ok := range []string{"app.war", "ROOT.war", "manager#foo.war", "NoExtension", "/commerciale", "api/v1", "/"} {
+		if err := validateContextPath(ok); err != nil {
+			t.Errorf("validateContextPath(%q) = %v; want nil", ok, err)
 		}
+	}
+}
+
+// The whole point of a context path: the artifact keeps the name Maven gave it
+// while the app is served somewhere else.
+func TestContextPathIsIndependentOfTheArtifactName(t *testing.T) {
+	base, project := fakeBase(t), fakeProject(t, "CommercialePlus")
+	war := model.WarArtifact{SourcePath: project, DestName: "/commerciale", DeployMode: model.DeployWar}
+
+	if err := deployWar(base, war); err != nil {
+		t.Fatalf("deployWar: %v", err)
+	}
+	descriptor := filepath.Join(contextDir(base), "commerciale.xml")
+	raw, err := os.ReadFile(descriptor)
+	if err != nil {
+		t.Fatalf("expected a descriptor at %s: %v", descriptor, err)
+	}
+	wantDoc := filepath.Join(project, "target", "CommercialePlus.war")
+	if !strings.Contains(string(raw), escapeForXMLAttr(wantDoc)) {
+		t.Errorf("descriptor should point at the untouched artifact %s:\n%s", wantDoc, raw)
+	}
+}
+
+// Changing the context path has to take the old one down, or the app answers on
+// both URLs and nobody can tell which one is live.
+func TestChangingTheContextPathRemovesTheOldOne(t *testing.T) {
+	storage := openTempStorage(t)
+
+	install := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(install, "webapps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := storage.SaveConfig(model.Config{TomEEPath: install, HTTPPort: 8080}); err != nil {
+		t.Fatal(err)
+	}
+
+	project := fakeProject(t, "CommercialePlus")
+	if err := storage.SaveWar(model.WarArtifact{
+		SourcePath: project, DestName: "CommercialePlus.war", Enabled: true, DeployMode: model.DeployCopy,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	warSvc := NewWarService(storage)
+	if err := warSvc.DeployAll(); err != nil {
+		t.Fatalf("first DeployAll: %v", err)
+	}
+	old := filepath.Join(install, "webapps", "CommercialePlus.war")
+	if !exists(old) {
+		t.Fatalf("%s was not deployed", old)
+	}
+
+	wars, err := storage.ListWars()
+	if err != nil || len(wars) != 1 {
+		t.Fatalf("ListWars = %+v, %v", wars, err)
+	}
+	if wars[0].DeployedAs != "CommercialePlus" {
+		t.Errorf("DeployedAs = %q, want CommercialePlus", wars[0].DeployedAs)
+	}
+
+	renamed := wars[0]
+	renamed.DestName = "/commerciale"
+	if err := storage.SaveWar(renamed); err != nil {
+		t.Fatal(err)
+	}
+	if err := warSvc.DeployAll(); err != nil {
+		t.Fatalf("second DeployAll: %v", err)
+	}
+
+	if exists(old) {
+		t.Error("the old context survived the rename: the app answers on both URLs")
+	}
+	if !exists(filepath.Join(install, "webapps", "commerciale.war")) {
+		t.Error("the new context was not deployed")
+	}
+	wars, _ = storage.ListWars()
+	if wars[0].DeployedAs != "commerciale" {
+		t.Errorf("DeployedAs = %q, want commerciale", wars[0].DeployedAs)
+	}
+
+	// Undeploy clears the record too, so a later deploy does not try to remove
+	// something that is already gone.
+	if err := warSvc.Undeploy(wars[0].ID); err != nil {
+		t.Fatalf("Undeploy: %v", err)
+	}
+	wars, _ = storage.ListWars()
+	if wars[0].DeployedAs != "" {
+		t.Errorf("DeployedAs = %q after Undeploy, want empty", wars[0].DeployedAs)
+	}
+	deployed, err := warSvc.IsDeployed(wars[0].ID)
+	if err != nil || deployed {
+		t.Errorf("IsDeployed = %v, %v; want false", deployed, err)
 	}
 }
 

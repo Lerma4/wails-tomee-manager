@@ -75,13 +75,54 @@ func (s *StorageService) createTables() error {
 		`ALTER TABLE config ADD COLUMN open_browser BOOLEAN DEFAULT 0`,
 		`ALTER TABLE config ADD COLUMN isolated_base BOOLEAN DEFAULT 0`,
 		`ALTER TABLE wars ADD COLUMN deploy_mode TEXT DEFAULT 'copy'`,
+		`ALTER TABLE wars ADD COLUMN deployed_as TEXT DEFAULT ''`,
 	} {
 		_, _ = s.db.Exec(migration)
+	}
+
+	if err := s.backfillDeployedAs(); err != nil {
+		return err
 	}
 
 	// Init default config if not exists
 	_, err := s.db.Exec(`INSERT OR IGNORE INTO config (id, tomee_path, java_home, http_port, debug_port, shutdown_port) VALUES (1, '', '', 8080, 8000, 8005)`)
 	return err
+}
+
+// backfillDeployedAs assumes an artifact configured before this column existed
+// is deployed under the context its name implies. Without it, changing the
+// context path of an existing artifact would leave the old one behind, because
+// nothing recorded where it went.
+//
+// Guessing wrong is harmless: removing a deployment that is not there is a
+// no-op.
+func (s *StorageService) backfillDeployedAs() error {
+	rows, err := s.db.Query(`SELECT id, dest_name FROM wars WHERE COALESCE(deployed_as, '') = ''`)
+	if err != nil {
+		return err
+	}
+	pending := map[int]string{}
+	for rows.Next() {
+		var id int
+		var destName string
+		if err := rows.Scan(&id, &destName); err != nil {
+			rows.Close()
+			return err
+		}
+		pending[id] = contextName(destName)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	for id, context := range pending {
+		if _, err := s.db.Exec(`UPDATE wars SET deployed_as=? WHERE id=?`, context, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *StorageService) SaveConfig(config model.Config) error {
@@ -105,12 +146,12 @@ func (s *StorageService) SaveWar(war model.WarArtifact) error {
 		war.DeployMode = model.DeployCopy
 	}
 	if war.ID == 0 {
-		_, err := s.db.Exec(`INSERT INTO wars (source_path, dest_name, enabled, deploy_mode) VALUES (?, ?, ?, ?)`,
-			war.SourcePath, war.DestName, war.Enabled, war.DeployMode)
+		_, err := s.db.Exec(`INSERT INTO wars (source_path, dest_name, enabled, deploy_mode, deployed_as) VALUES (?, ?, ?, ?, ?)`,
+			war.SourcePath, war.DestName, war.Enabled, war.DeployMode, war.DeployedAs)
 		return err
 	}
-	_, err := s.db.Exec(`UPDATE wars SET source_path=?, dest_name=?, enabled=?, deploy_mode=? WHERE id=?`,
-		war.SourcePath, war.DestName, war.Enabled, war.DeployMode, war.ID)
+	_, err := s.db.Exec(`UPDATE wars SET source_path=?, dest_name=?, enabled=?, deploy_mode=?, deployed_as=? WHERE id=?`,
+		war.SourcePath, war.DestName, war.Enabled, war.DeployMode, war.DeployedAs, war.ID)
 	return err
 }
 
@@ -121,13 +162,13 @@ func (s *StorageService) DeleteWar(id int) error {
 
 func (s *StorageService) GetWar(id int) (model.WarArtifact, error) {
 	var war model.WarArtifact
-	row := s.db.QueryRow(`SELECT id, source_path, dest_name, enabled, COALESCE(deploy_mode, 'copy') FROM wars WHERE id=?`, id)
-	err := row.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled, &war.DeployMode)
+	row := s.db.QueryRow(`SELECT id, source_path, dest_name, enabled, COALESCE(deploy_mode, 'copy'), COALESCE(deployed_as, '') FROM wars WHERE id=?`, id)
+	err := row.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled, &war.DeployMode, &war.DeployedAs)
 	return war, err
 }
 
 func (s *StorageService) ListWars() ([]model.WarArtifact, error) {
-	rows, err := s.db.Query(`SELECT id, source_path, dest_name, enabled, COALESCE(deploy_mode, 'copy') FROM wars ORDER BY id`)
+	rows, err := s.db.Query(`SELECT id, source_path, dest_name, enabled, COALESCE(deploy_mode, 'copy'), COALESCE(deployed_as, '') FROM wars ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +177,7 @@ func (s *StorageService) ListWars() ([]model.WarArtifact, error) {
 	var wars []model.WarArtifact
 	for rows.Next() {
 		var war model.WarArtifact
-		if err := rows.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled, &war.DeployMode); err != nil {
+		if err := rows.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled, &war.DeployMode, &war.DeployedAs); err != nil {
 			return nil, err
 		}
 		wars = append(wars, war)

@@ -54,6 +54,8 @@ func TestLiveStartAndStop(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
+	requireFreePorts(t, config)
+
 	svc := NewTomEEService(storage)
 	if err := svc.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -221,6 +223,8 @@ func TestLiveExplodedDeployIsServed(t *testing.T) {
 	}
 	t.Logf("descriptor: %s", strings.TrimSpace(string(raw)))
 
+	requireFreePorts(t, config)
+
 	svc := NewTomEEService(storage)
 	if err := svc.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -353,6 +357,13 @@ func TestLiveRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	base, err := instanceDir(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	requireFreePorts(t, config)
+
 	svc := NewTomEEService(storage)
 	if err := svc.Start(); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -363,7 +374,7 @@ func TestLiveRestart(t *testing.T) {
 		}
 		_ = waitForPortFree(18080, 60*time.Second)
 	})
-	waitUntilServing(t, 18080)
+	waitUntilServing(t, base, 18080)
 
 	// Repeat it: a restart that races the old JVM tends to fail intermittently,
 	// so once proves little.
@@ -372,7 +383,7 @@ func TestLiveRestart(t *testing.T) {
 		if err := svc.Restart(); err != nil {
 			t.Fatalf("Restart %d: %v", i, err)
 		}
-		waitUntilServing(t, 18080)
+		waitUntilServing(t, base, 18080)
 		t.Logf("restart %d came back up in %v", i, time.Since(start).Round(time.Millisecond))
 	}
 
@@ -384,14 +395,46 @@ func TestLiveRestart(t *testing.T) {
 	}
 }
 
-// waitUntilServing blocks until the server answers, failing the test on timeout.
-func waitUntilServing(t *testing.T, port int) {
+// waitUntilServing blocks until the server answers. On timeout it prints the
+// tail of the server's own log: a live test that just says "never answered"
+// gives nothing to work with.
+// requireFreePorts makes each live test start from a clean slate. Without it a
+// server still shutting down from the previous test shows up as an unexplained
+// startup timeout rather than a clear message.
+func requireFreePorts(t *testing.T, config model.Config) {
+	t.Helper()
+	if err := waitForPortsFree(config, 90*time.Second); err != nil {
+		t.Fatalf("ports not free before starting: %v", err)
+	}
+}
+
+func waitUntilServing(t *testing.T, base string, port int) {
 	t.Helper()
 	deadline := time.Now().Add(120 * time.Second)
 	for !httpAlive(port) {
 		if time.Now().After(deadline) {
+			dumpServerLog(t, base)
 			t.Fatalf("TomEE never answered on port %d", port)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+func dumpServerLog(t *testing.T, base string) {
+	t.Helper()
+	logs, _ := filepath.Glob(filepath.Join(base, "logs", "catalina.*.log"))
+	if len(logs) == 0 {
+		t.Logf("no catalina log under %s", filepath.Join(base, "logs"))
+		return
+	}
+	raw, err := os.ReadFile(logs[0])
+	if err != nil {
+		t.Logf("cannot read %s: %v", logs[0], err)
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) > 30 {
+		lines = lines[len(lines)-30:]
+	}
+	t.Logf("tail of %s:\n%s", filepath.Base(logs[0]), strings.Join(lines, "\n"))
 }

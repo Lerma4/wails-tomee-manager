@@ -19,16 +19,20 @@ func NewWarService(storage *StorageService) *WarService {
 	}
 }
 
-// validateDestName rejects names that would escape webapps/ or resolve to the
-// directory itself. Nested contexts use Tomcat's "a#b.war" spelling, so a
-// legitimate name never contains a path separator.
-func validateDestName(destName string) error {
-	name := strings.TrimSpace(destName)
+// validateContextPath rejects anything that could escape webapps/ or produce a
+// file name the platform cannot represent. Slashes are allowed and meaningful:
+// "/commerciale" is the ordinary way to write a context path, and "api/v1" is a
+// nested one.
+func validateContextPath(path string) error {
+	name := strings.TrimSpace(path)
 	if name == "" {
-		return fmt.Errorf("deployment name is empty")
+		return fmt.Errorf("context path is empty")
 	}
-	if strings.ContainsAny(name, `/\`) || strings.Contains(name, "..") {
-		return fmt.Errorf("invalid deployment name %q: use a plain file name such as app.war", destName)
+	if strings.Contains(name, "..") {
+		return fmt.Errorf("invalid context path %q: it must not contain %q", path, "..")
+	}
+	if strings.ContainsAny(name, `:*?"<>|`) {
+		return fmt.Errorf("invalid context path %q: it becomes a file name, so it cannot contain : * ? \" < > |", path)
 	}
 	return nil
 }
@@ -42,13 +46,13 @@ type deployment struct {
 }
 
 func deploymentFor(base, destName string) deployment {
-	name := strings.TrimSpace(destName)
-	if !strings.EqualFold(filepath.Ext(name), ".war") {
-		name += ".war"
-	}
+	// Everything is keyed off the context name. Under webapps/ Tomcat derives
+	// the context from the file name, so there the two cannot differ; a context
+	// descriptor is what lets the artifact keep its own name.
+	ctx := contextName(destName)
 	return deployment{
-		warFile:     filepath.Join(webappsDir(base), name),
-		unpackedDir: filepath.Join(webappsDir(base), contextName(destName)),
+		warFile:     filepath.Join(webappsDir(base), ctx+".war"),
+		unpackedDir: filepath.Join(webappsDir(base), ctx),
 		descriptor:  contextFile(base, destName),
 	}
 }
@@ -89,9 +93,33 @@ func (s *WarService) DeployAll() error {
 		if !war.Enabled {
 			continue
 		}
-		if err := deployWar(base, war); err != nil {
+		if err := s.deployAndRecord(base, war); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// deployAndRecord deploys and remembers the context it landed on, clearing the
+// previous one first when the context path has been changed. Without this a
+// rename leaves the old context deployed and the app answers on both URLs.
+func (s *WarService) deployAndRecord(base string, war model.WarArtifact) error {
+	if err := validateContextPath(war.DestName); err != nil {
+		return err
+	}
+	current := contextName(war.DestName)
+
+	if war.DeployedAs != "" && war.DeployedAs != current {
+		if err := deploymentFor(base, war.DeployedAs).clear(); err != nil {
+			return fmt.Errorf("failed to remove the previous context %q: %w", war.DeployedAs, err)
+		}
+	}
+	if err := deployWar(base, war); err != nil {
+		return err
+	}
+	if war.DeployedAs != current {
+		war.DeployedAs = current
+		return s.configService.SaveWar(war)
 	}
 	return nil
 }
@@ -110,7 +138,7 @@ func (s *WarService) DeploySingle(warId int) error {
 	if err != nil {
 		return fmt.Errorf("WAR artifact with id %d not found: %w", warId, err)
 	}
-	return deployWar(base, war)
+	return s.deployAndRecord(base, war)
 }
 
 // Undeploy removes the artifact from the server without touching the build
@@ -128,10 +156,30 @@ func (s *WarService) Undeploy(warId int) error {
 	if err != nil {
 		return fmt.Errorf("WAR artifact with id %d not found: %w", warId, err)
 	}
-	if err := validateDestName(war.DestName); err != nil {
+	if err := validateContextPath(war.DestName); err != nil {
 		return err
 	}
-	return deploymentFor(base, war.DestName).clear()
+	// The previously deployed context may differ from the one configured now.
+	for _, name := range deployedContexts(war) {
+		if err := deploymentFor(base, name).clear(); err != nil {
+			return err
+		}
+	}
+	if war.DeployedAs != "" {
+		war.DeployedAs = ""
+		return s.configService.SaveWar(war)
+	}
+	return nil
+}
+
+// deployedContexts lists every context this artifact may currently occupy: the
+// configured one, plus the one it was last deployed as if that differs.
+func deployedContexts(war model.WarArtifact) []string {
+	names := []string{war.DestName}
+	if war.DeployedAs != "" && war.DeployedAs != contextName(war.DestName) {
+		names = append(names, war.DeployedAs)
+	}
+	return names
 }
 
 // IsDeployed reports whether the artifact is currently present on the server,
@@ -149,20 +197,22 @@ func (s *WarService) IsDeployed(warId int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := validateDestName(war.DestName); err != nil {
+	if err := validateContextPath(war.DestName); err != nil {
 		return false, err
 	}
-	d := deploymentFor(base, war.DestName)
-	for _, path := range []string{d.descriptor, d.warFile, d.unpackedDir} {
-		if _, err := os.Stat(path); err == nil {
-			return true, nil
+	for _, name := range deployedContexts(war) {
+		d := deploymentFor(base, name)
+		for _, path := range []string{d.descriptor, d.warFile, d.unpackedDir} {
+			if _, err := os.Stat(path); err == nil {
+				return true, nil
+			}
 		}
 	}
 	return false, nil
 }
 
 func deployWar(base string, war model.WarArtifact) error {
-	if err := validateDestName(war.DestName); err != nil {
+	if err := validateContextPath(war.DestName); err != nil {
 		return err
 	}
 	target := deploymentFor(base, war.DestName)

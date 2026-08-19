@@ -31,7 +31,15 @@ const (
 type WarArtifact struct {
 	ID         int    `json:"id"`
 	SourcePath string `json:"sourcePath"`
+	// DestName is the context path the app is served on, e.g. "/commerciale".
+	// The built artifact keeps its own name; only under webapps/ do the two
+	// have to agree, because Tomcat derives the context from the file name
+	// there.
 	DestName   string `json:"destName"`
 	Enabled    bool   `json:"enabled"`
 	DeployMode string `json:"deployMode"`
+	// DeployedAs is the context this artifact was last deployed under, so a
+	// changed context path can clean up after itself. Set by the deploy, not
+	// by the user.
+	DeployedAs string `json:"deployedAs"`
 }
