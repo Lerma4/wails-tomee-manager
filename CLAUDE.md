@@ -109,9 +109,43 @@ All services are bound to the frontend in `main.go` — their exported methods b
 - **Single-row config**: The `config` table enforces `id = 1` via CHECK constraint
 - **Cross-platform**: TomEE service selects `catalina.bat` vs `catalina.sh` based on `runtime.GOOS`
 
-### Versioning
+### Versioning — MANDATORY
 
-- **Source of truth**: `frontend/package.json` → campo `"version"` (es. `"0.1.0"`)
-- **Build-time injection**: `vite.config.ts` espone `__APP_VERSION__` via `define` — usata dal componente `Footer.tsx`
-- **Git tag convention**: i tag devono corrispondere alla versione in `package.json` (es. `v0.1.0`)
-- Quando si rilascia una nuova versione: aggiornare `"version"` in `package.json` e taggare il commit (`git tag v<version>`)
+These rules are binding, for humans and for agents alike. No release, no commit
+message, and no tag may deviate from them. There is no "small release".
+
+- **Source of truth**: `frontend/package.json` → `"version"`. Nothing else stores
+  the version: `vite.config.ts` injects it as `__APP_VERSION__` and `Footer.tsx`
+  displays it.
+- **Scheme**: [SemVer](https://semver.org/) — `MAJOR.MINOR.PATCH`.
+  - `MAJOR` — the user has to do something: a config that no longer loads, a
+    deploy mode that behaves differently, a dropped TomEE version.
+  - `MINOR` — new capability, existing setups keep working (`feat:`).
+  - `PATCH` — fixes and internals only (`fix:`, `chore:`, `docs:`, `style:`).
+- **Commits**: [Conventional Commits](https://www.conventionalcommits.org/)
+  (`feat:`, `fix:`, `chore:`, `docs:`, `style:`, `refactor:`, `test:`). The
+  commits since the last tag are what decide the next number.
+
+### Releasing — MANDATORY
+
+Run every step, in this order, every time. A release that skipped the verify
+block is not a release. Releases are cut on `main`, never on a feature branch.
+Migrations of the SQLite schema are part of the release: a `MAJOR` is the only
+place a stored config may stop loading.
+
+```bash
+git checkout main && git pull                  # start from what is published
+go tool golangci-lint run ./... && go test ./...
+cd frontend && npm run lint && npm run build && cd ..
+npm --prefix frontend version 1.2.3 --no-git-tag-version   # bump the only source of truth
+git commit -am "chore(release): v1.2.3"
+git tag -a v1.2.3 -m "v1.2.3"                  # annotated: the tag carries an author and a date
+git push --follow-tags
+```
+
+- **Never tag a commit whose verify block failed.** The four checks under
+  "Verify" gate the release exactly as they gate any other change.
+- **Tag format**: `v<version>`, matching `package.json` exactly (`v1.2.3`).
+- **Annotated only** (`-a`): a lightweight tag has no author, date, or message,
+  and `git describe` treats the two differently.
+- Never move or delete a pushed tag. A bad release gets a new patch.
