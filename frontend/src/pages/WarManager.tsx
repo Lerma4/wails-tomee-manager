@@ -34,6 +34,42 @@ const deployModeOf = (war: model.WarArtifact): DeployMode =>
 /** Stages of the Build to Deploy to Restart chain, or '' when idle. */
 type ChainStage = '' | 'building' | 'deploying' | 'restarting';
 
+const CHAIN_TIP: Record<ChainStage, string> = {
+    '': 'Build, deploy, then restart TomEE',
+    building: 'Building the project...',
+    deploying: 'Copying the build to the server...',
+    restarting: 'Restarting TomEE...',
+};
+
+// Written out rather than interpolated so the class names stay greppable.
+const TOOLTIP_SIDE = {
+    left: 'tooltip-left',
+    right: 'tooltip-right',
+    top: 'tooltip-top',
+    bottom: 'tooltip-bottom',
+} as const;
+
+/**
+ * Explains an icon-only control on hover.
+ *
+ * The wrapper matters twice over: a disabled .btn has pointer-events none and
+ * would never show a tooltip of its own, and the table sits in a panel with
+ * overflow-hidden — so tooltips have to point inwards or they get clipped.
+ */
+const Hint = ({
+    tip,
+    side = 'left',
+    children,
+}: {
+    tip: string;
+    side?: keyof typeof TOOLTIP_SIDE;
+    children: React.ReactNode;
+}) => (
+    <span className={`tooltip ${TOOLTIP_SIDE[side]}`} data-tip={tip}>
+        {children}
+    </span>
+);
+
 /* ------------------------------------------------------------------ */
 /*  BuildLogModal                                                      */
 /* ------------------------------------------------------------------ */
@@ -382,35 +418,38 @@ const WarManager = () => {
 
         if (state === 'building') {
             return (
-                <button type="button"
-                    className="btn btn-ghost btn-xs"
-                    onClick={() => setLogModalWarId(war.id)}
-                    title="View build logs"
-                >
-                    <span className="loading loading-spinner loading-xs" />
-                </button>
+                <Hint tip="Build running — click to follow the output">
+                    <button type="button"
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => setLogModalWarId(war.id)}
+                    >
+                        <span className="loading loading-spinner loading-xs" />
+                    </button>
+                </Hint>
             );
         }
         if (state === 'success') {
             return (
-                <button type="button"
-                    className="btn btn-ghost btn-xs text-success"
-                    onClick={() => setLogModalWarId(war.id)}
-                    title="Build succeeded — click to view logs"
-                >
-                    <FaCheckCircle />
-                </button>
+                <Hint tip="Build succeeded — click to see the output">
+                    <button type="button"
+                        className="btn btn-ghost btn-xs text-success"
+                        onClick={() => setLogModalWarId(war.id)}
+                    >
+                        <FaCheckCircle />
+                    </button>
+                </Hint>
             );
         }
         if (state === 'error') {
             return (
-                <button type="button"
-                    className="btn btn-ghost btn-xs text-error"
-                    onClick={() => setLogModalWarId(war.id)}
-                    title="Build failed — click to view logs"
-                >
-                    <FaTimesCircle />
-                </button>
+                <Hint tip="Build failed — click to see why">
+                    <button type="button"
+                        className="btn btn-ghost btn-xs text-error"
+                        onClick={() => setLogModalWarId(war.id)}
+                    >
+                        <FaTimesCircle />
+                    </button>
+                </Hint>
             );
         }
 
@@ -418,21 +457,23 @@ const WarManager = () => {
         const hasLogs = (buildLogs[war.id] || []).length > 0;
         return (
             <div className="flex gap-0.5 justify-center">
-                <button type="button"
-                    className="btn btn-ghost btn-xs"
-                    onClick={() => handleBuild(war.id)}
-                    title="Run Maven build"
-                >
-                    <FaHammer />
-                </button>
-                {hasLogs && (
+                <Hint tip={`Run mvn install -DskipTests -P${mavenProfile || 'dev'} in this project`}>
                     <button type="button"
-                        className="btn btn-ghost btn-xs text-base-content/40"
-                        onClick={() => setLogModalWarId(war.id)}
-                        title="View last build log"
+                        className="btn btn-ghost btn-xs"
+                        onClick={() => handleBuild(war.id)}
                     >
-                        <FaFileAlt />
+                        <FaHammer />
                     </button>
+                </Hint>
+                {hasLogs && (
+                    <Hint tip="Show the output of the last build">
+                        <button type="button"
+                            className="btn btn-ghost btn-xs text-base-content/40"
+                            onClick={() => setLogModalWarId(war.id)}
+                        >
+                            <FaFileAlt />
+                        </button>
+                    </Hint>
                 )}
             </div>
         );
@@ -443,12 +484,24 @@ const WarManager = () => {
     const renderWarExistsIndicator = (warId: number) => {
         const exists = warExistsMap[warId];
         if (exists === null || exists === undefined) {
-            return <span className="loading loading-spinner loading-xs" />;
+            return (
+                <Hint tip="Looking for a .war in target/..." side="right">
+                    <span className="loading loading-spinner loading-xs" />
+                </Hint>
+            );
         }
         if (exists) {
-            return <FaCheckCircle className="text-success" />;
+            return (
+                <Hint tip="A built .war is present in target/" side="right">
+                    <FaCheckCircle className="text-success" />
+                </Hint>
+            );
         }
-        return <FaTimesCircle className="text-error" />;
+        return (
+            <Hint tip="No .war in target/ — build the project first" side="right">
+                <FaTimesCircle className="text-error" />
+            </Hint>
+        );
     };
 
     /* ---------- Deployed indicator ---------- */
@@ -456,9 +509,9 @@ const WarManager = () => {
     const renderDeployedIndicator = (warId: number) => {
         if (deployedMap[warId] !== true) return null;
         return (
-            <span className="badge badge-xs badge-success ml-2 align-middle" title="Currently deployed on the server">
-                on server
-            </span>
+            <Hint tip="This artifact is on the server right now">
+                <span className="badge badge-xs badge-success ml-2 align-middle">on server</span>
+            </Hint>
         );
     };
 
@@ -473,6 +526,7 @@ const WarManager = () => {
                     <p className="text-sm text-base-content/40 mt-1">Manage and deploy WAR artifacts</p>
                 </div>
                 <div className="flex gap-2">
+                    <Hint tip="Re-check which projects have a build in target/, and what is on the server" side="bottom">
                     <button type="button"
                         className="btn btn-ghost btn-sm gap-2"
                         onClick={async () => {
@@ -485,15 +539,16 @@ const WarManager = () => {
                             setRefreshing(false);
                         }}
                         disabled={refreshing}
-                        title="Refresh WAR file status"
                     >
                         {refreshing
                             ? <span className="loading loading-spinner loading-xs" />
                             : <FaSync className="text-xs" />}
                         Refresh
                     </button>
+                    </Hint>
                     <div className="flex items-center gap-1">
                         <label className="text-xs text-base-content/40" htmlFor="maven-profile">Profile:</label>
+                        <Hint tip="Maven profile for every build, passed as -P<name>" side="bottom">
                         <input
                             id="maven-profile"
                             type="text"
@@ -502,10 +557,14 @@ const WarManager = () => {
                             onChange={(e) => setMavenProfile(e.target.value)}
                             placeholder="dev"
                         />
+                        </Hint>
                     </div>
-                    <button type="button" className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
-                        <FaPlus className="text-xs" /> Add WAR
-                    </button>
+                    <Hint tip="Add a Maven project to this list" side="bottom">
+                        <button type="button" className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
+                            <FaPlus className="text-xs" /> Add WAR
+                        </button>
+                    </Hint>
+                    <Hint tip="Deploy every enabled artifact, without rebuilding" side="bottom">
                     <button type="button"
                         className="btn btn-secondary btn-sm gap-2"
                         onClick={handleDeploy}
@@ -515,6 +574,7 @@ const WarManager = () => {
                         {!deploying && <FaRocket className="text-xs" />}
                         Deploy All
                     </button>
+                    </Hint>
                 </div>
             </div>
 
@@ -530,9 +590,17 @@ const WarManager = () => {
                     <table className="data-table w-full">
                         <thead>
                             <tr>
-                                <th className="w-20">Status</th>
+                                <th className="w-20">
+                                    <Hint tip="Enabled artifacts are the ones Deploy All touches" side="right">
+                                        <span>Status</span>
+                                    </Hint>
+                                </th>
                                 <th>Project Path</th>
-                                <th className="w-20 text-center">WAR File</th>
+                                <th className="w-20 text-center">
+                                    <Hint tip="Whether the project has a built .war in target/" side="right">
+                                        <span>WAR File</span>
+                                    </Hint>
+                                </th>
                                 <th>Destination</th>
                                 <th className="w-24 text-center">Mode</th>
                                 <th className="w-20 text-center">Build</th>
@@ -565,62 +633,64 @@ const WarManager = () => {
                                         {renderDeployedIndicator(war.id)}
                                     </td>
                                     <td className="text-center">
-                                        <span
-                                            className="badge badge-sm badge-ghost font-mono text-[0.65rem]"
-                                            title={DEPLOY_MODES[deployModeOf(war)].hint}
-                                        >
-                                            {DEPLOY_MODES[deployModeOf(war)].label}
-                                        </span>
+                                        <Hint tip={DEPLOY_MODES[deployModeOf(war)].hint}>
+                                            <span className="badge badge-sm badge-ghost font-mono text-[0.65rem]">
+                                                {DEPLOY_MODES[deployModeOf(war)].label}
+                                            </span>
+                                        </Hint>
                                     </td>
                                     <td className="text-center">
                                         {renderBuildButton(war)}
                                     </td>
                                     <td>
                                         <div className="flex gap-1 justify-end">
-                                            <button type="button"
-                                                className="btn btn-ghost btn-xs text-primary"
-                                                onClick={() => handleBuildAndRun(war.id)}
-                                                disabled={(chainStage[war.id] || '') !== ''}
-                                                title={chainStage[war.id]
-                                                    ? `${chainStage[war.id]}...`
-                                                    : 'Build, deploy, then restart TomEE'}
-                                            >
-                                                {chainStage[war.id]
-                                                    ? <span className="loading loading-spinner loading-xs" />
-                                                    : <FaBolt />}
-                                            </button>
-                                            <button type="button"
-                                                className="btn btn-ghost btn-xs text-secondary"
-                                                onClick={() => handleDeploySingle(war.id)}
-                                                disabled={deployingIds.has(war.id)}
-                                                title="Deploy this WAR"
-                                            >
-                                                {deployingIds.has(war.id)
-                                                    ? <span className="loading loading-spinner loading-xs" />
-                                                    : <FaRocket />}
-                                            </button>
-                                            <button type="button"
-                                                className="btn btn-ghost btn-xs text-warning"
-                                                onClick={() => handleUndeploy(war.id)}
-                                                disabled={deployedMap[war.id] === false}
-                                                title="Remove this artifact from the server"
-                                            >
-                                                <FaEject />
-                                            </button>
-                                            <button type="button"
-                                                className="btn btn-ghost btn-xs"
-                                                onClick={() => openModal(war)}
-                                                title="Edit"
-                                            >
-                                                <FaEdit />
-                                            </button>
-                                            <button type="button"
-                                                className="btn btn-ghost btn-xs text-error"
-                                                onClick={() => handleDelete(war.id)}
-                                                title="Delete"
-                                            >
-                                                <FaTrash />
-                                            </button>
+                                            <Hint tip={CHAIN_TIP[chainStage[war.id] || '']}>
+                                                <button type="button"
+                                                    className="btn btn-ghost btn-xs text-primary"
+                                                    onClick={() => handleBuildAndRun(war.id)}
+                                                    disabled={(chainStage[war.id] || '') !== ''}
+                                                >
+                                                    {chainStage[war.id]
+                                                        ? <span className="loading loading-spinner loading-xs" />
+                                                        : <FaBolt />}
+                                                </button>
+                                            </Hint>
+                                            <Hint tip="Deploy the existing build to the server, without rebuilding">
+                                                <button type="button"
+                                                    className="btn btn-ghost btn-xs text-secondary"
+                                                    onClick={() => handleDeploySingle(war.id)}
+                                                    disabled={deployingIds.has(war.id)}
+                                                >
+                                                    {deployingIds.has(war.id)
+                                                        ? <span className="loading loading-spinner loading-xs" />
+                                                        : <FaRocket />}
+                                                </button>
+                                            </Hint>
+                                            <Hint tip="Remove from the server — the build in target/ is kept. Stop TomEE first.">
+                                                <button type="button"
+                                                    className="btn btn-ghost btn-xs text-warning"
+                                                    onClick={() => handleUndeploy(war.id)}
+                                                    disabled={deployedMap[war.id] === false}
+                                                >
+                                                    <FaEject />
+                                                </button>
+                                            </Hint>
+                                            <Hint tip="Edit the project path, deployment name and deploy mode">
+                                                <button type="button"
+                                                    className="btn btn-ghost btn-xs"
+                                                    onClick={() => openModal(war)}
+                                                >
+                                                    <FaEdit />
+                                                </button>
+                                            </Hint>
+                                            <Hint tip="Remove from this list — does not undeploy it from the server">
+                                                <button type="button"
+                                                    className="btn btn-ghost btn-xs text-error"
+                                                    onClick={() => handleDelete(war.id)}
+                                                >
+                                                    <FaTrash />
+                                                </button>
+                                            </Hint>
                                         </div>
                                     </td>
                                 </tr>
