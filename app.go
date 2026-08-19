@@ -42,18 +42,8 @@ func (a *App) SelectDirectory() (string, error) {
 	})
 }
 
-func (a *App) SelectWarFile() (string, error) {
-	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select WAR File",
-		Filters: []runtime.FileFilter{
-			{
-				DisplayName: "WAR Files",
-				Pattern:     "*.war",
-			},
-			{
-				DisplayName: "All Files",
-				Pattern:     "*.*",
-			},
-		},
+func (a *App) SelectProjectDir() (string, error) {
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Maven Project Directory",
 	})
 }

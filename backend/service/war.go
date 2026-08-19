@@ -38,19 +38,43 @@ func (s *WarService) DeployAll() error {
 			continue
 		}
 
-		// Check if source exists
-		if _, err := os.Stat(war.SourcePath); os.IsNotExist(err) {
-			// Log error but continue? Or fail?
-			// For now let's return error to alert user
-			return fmt.Errorf("source war not found: %s", war.SourcePath)
+		warFile, err := findWarInTarget(war.SourcePath)
+		if err != nil {
+			return fmt.Errorf("WAR not found for project %s: %w", war.SourcePath, err)
 		}
 
 		destPath := filepath.Join(webappsDir, war.DestName)
 
-		// Copy file
-		if err := copyFile(war.SourcePath, destPath); err != nil {
-			return fmt.Errorf("failed to copy %s to %s: %w", war.SourcePath, destPath, err)
+		if err := copyFile(warFile, destPath); err != nil {
+			return fmt.Errorf("failed to copy %s to %s: %w", warFile, destPath, err)
 		}
+	}
+
+	return nil
+}
+
+func (s *WarService) DeploySingle(warId int) error {
+	config, err := s.configService.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if config.TomEEPath == "" {
+		return fmt.Errorf("tomee path not configured")
+	}
+
+	war, err := s.configService.GetWar(warId)
+	if err != nil {
+		return fmt.Errorf("WAR artifact with id %d not found: %w", warId, err)
+	}
+
+	warFile, err := findWarInTarget(war.SourcePath)
+	if err != nil {
+		return fmt.Errorf("WAR not found for project %s: %w", war.SourcePath, err)
+	}
+
+	destPath := filepath.Join(config.TomEEPath, "webapps", war.DestName)
+	if err := copyFile(warFile, destPath); err != nil {
+		return fmt.Errorf("failed to copy %s to %s: %w", warFile, destPath, err)
 	}
 
 	return nil

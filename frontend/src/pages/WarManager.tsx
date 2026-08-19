@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ListWars, SaveWar, DeleteWar } from '../../wailsjs/go/service/StorageService';
-import { DeployAll as DeployAllWars } from '../../wailsjs/go/service/WarService';
+import { DeployAll as DeployAllWars, DeploySingle } from '../../wailsjs/go/service/WarService';
 import { CheckWarExists, RunBuild } from '../../wailsjs/go/service/MavenService';
-import { SelectWarFile } from '../../wailsjs/go/main/App';
+import { SelectProjectDir } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { model } from '../../wailsjs/go/models';
 import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen, FaSync, FaCheckCircle, FaTimesCircle, FaHammer, FaFileAlt } from 'react-icons/fa';
@@ -27,6 +27,7 @@ const BuildLogModal = ({ warId, wars, buildStates, buildLogs, onClose }: BuildLo
     const state = buildStates[warId] || 'idle';
     const lines = buildLogs[warId] || [];
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `lines` is the trigger, not a value read by the effect
     useEffect(() => {
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [lines]);
@@ -57,7 +58,7 @@ const BuildLogModal = ({ warId, wars, buildStates, buildLogs, onClose }: BuildLo
                             {badgeLabel}
                         </span>
                     </div>
-                    <button className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>Close</button>
                 </div>
 
                 {/* Log area */}
@@ -96,6 +97,7 @@ const WarManager = () => {
     const [buildLogs, setBuildLogs] = useState<Record<number, string[]>>({});
     const [logModalWarId, setLogModalWarId] = useState<number | null>(null);
     const [refreshing, setRefreshing] = useState(false);
+    const [deployingIds, setDeployingIds] = useState<Set<number>>(new Set());
     const buildTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
     /* ---------- WAR existence helpers ---------- */
@@ -108,7 +110,7 @@ const WarManager = () => {
     };
 
     const checkAllWarExists = (warList: model.WarArtifact[]) => {
-        warList.forEach((w) => checkWarExists(w));
+        warList.forEach((w) => { checkWarExists(w); });
     };
 
     /* ---------- Fetch & lifecycle ---------- */
@@ -123,6 +125,7 @@ const WarManager = () => {
             .catch(console.error);
     };
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: initial load only; fetchWars is re-created every render
     useEffect(() => { fetchWars(); }, []);
 
     /* ---------- Event listeners for Maven build ---------- */
@@ -133,6 +136,7 @@ const WarManager = () => {
     const activeListeners = useRef<Map<number, () => void>>(new Map());
 
     // Incremental listener management: register new, unregister removed
+    // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on `wars` only — see 46cf3d7, adding deps tears listeners down mid-build
     useEffect(() => {
         const currentIds = new Set(wars.map((w) => w.id));
         const registeredIds = activeListeners.current;
@@ -188,9 +192,9 @@ const WarManager = () => {
     // Full teardown on unmount only
     useEffect(() => {
         return () => {
-            activeListeners.current.forEach((cleanup) => cleanup());
+            activeListeners.current.forEach((cleanup) => { cleanup(); });
             activeListeners.current.clear();
-            buildTimers.current.forEach((timer) => clearTimeout(timer));
+            buildTimers.current.forEach((timer) => { clearTimeout(timer); });
             buildTimers.current.clear();
         };
     }, []);
@@ -227,7 +231,7 @@ const WarManager = () => {
             fetchWars();
         } catch (err) {
             console.error(err);
-            alert('Error saving WAR: ' + err);
+            alert(`Error saving WAR: ${err}`);
         }
     };
 
@@ -246,9 +250,24 @@ const WarManager = () => {
             await DeployAllWars();
             alert('Deployment successful!');
         } catch (err) {
-            alert('Deployment failed: ' + err);
+            alert(`Deployment failed: ${err}`);
         } finally {
             setDeploying(false);
+        }
+    };
+
+    const handleDeploySingle = async (warId: number) => {
+        setDeployingIds((prev) => new Set(prev).add(warId));
+        try {
+            await DeploySingle(warId);
+        } catch (err) {
+            alert(`Deploy failed: ${err}`);
+        } finally {
+            setDeployingIds((prev) => {
+                const next = new Set(prev);
+                next.delete(warId);
+                return next;
+            });
         }
     };
 
@@ -264,7 +283,7 @@ const WarManager = () => {
 
         if (state === 'building') {
             return (
-                <button
+                <button type="button"
                     className="btn btn-ghost btn-xs"
                     onClick={() => setLogModalWarId(war.id)}
                     title="View build logs"
@@ -275,7 +294,7 @@ const WarManager = () => {
         }
         if (state === 'success') {
             return (
-                <button
+                <button type="button"
                     className="btn btn-ghost btn-xs text-success"
                     onClick={() => setLogModalWarId(war.id)}
                     title="Build succeeded — click to view logs"
@@ -286,7 +305,7 @@ const WarManager = () => {
         }
         if (state === 'error') {
             return (
-                <button
+                <button type="button"
                     className="btn btn-ghost btn-xs text-error"
                     onClick={() => setLogModalWarId(war.id)}
                     title="Build failed — click to view logs"
@@ -300,7 +319,7 @@ const WarManager = () => {
         const hasLogs = (buildLogs[war.id] || []).length > 0;
         return (
             <div className="flex gap-0.5 justify-center">
-                <button
+                <button type="button"
                     className="btn btn-ghost btn-xs"
                     onClick={() => handleBuild(war.id)}
                     title="Run Maven build"
@@ -308,7 +327,7 @@ const WarManager = () => {
                     <FaHammer />
                 </button>
                 {hasLogs && (
-                    <button
+                    <button type="button"
                         className="btn btn-ghost btn-xs text-base-content/40"
                         onClick={() => setLogModalWarId(war.id)}
                         title="View last build log"
@@ -344,7 +363,7 @@ const WarManager = () => {
                     <p className="text-sm text-base-content/40 mt-1">Manage and deploy WAR artifacts</p>
                 </div>
                 <div className="flex gap-2">
-                    <button
+                    <button type="button"
                         className="btn btn-ghost btn-sm gap-2"
                         onClick={async () => {
                             setRefreshing(true);
@@ -364,8 +383,9 @@ const WarManager = () => {
                         Refresh
                     </button>
                     <div className="flex items-center gap-1">
-                        <label className="text-xs text-base-content/40">Profile:</label>
+                        <label className="text-xs text-base-content/40" htmlFor="maven-profile">Profile:</label>
                         <input
+                            id="maven-profile"
                             type="text"
                             className="input input-bordered input-sm font-mono text-xs w-24"
                             value={mavenProfile}
@@ -373,10 +393,10 @@ const WarManager = () => {
                             placeholder="dev"
                         />
                     </div>
-                    <button className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
+                    <button type="button" className="btn btn-primary btn-sm gap-2" onClick={() => openModal()}>
                         <FaPlus className="text-xs" /> Add WAR
                     </button>
-                    <button
+                    <button type="button"
                         className="btn btn-secondary btn-sm gap-2"
                         onClick={handleDeploy}
                         disabled={deploying}
@@ -401,7 +421,7 @@ const WarManager = () => {
                         <thead>
                             <tr>
                                 <th className="w-20">Status</th>
-                                <th>Source Path</th>
+                                <th>Project Path</th>
                                 <th className="w-20 text-center">WAR File</th>
                                 <th>Destination</th>
                                 <th className="w-20 text-center">Build</th>
@@ -437,14 +457,24 @@ const WarManager = () => {
                                     </td>
                                     <td>
                                         <div className="flex gap-1 justify-end">
-                                            <button
+                                            <button type="button"
+                                                className="btn btn-ghost btn-xs text-secondary"
+                                                onClick={() => handleDeploySingle(war.id)}
+                                                disabled={deployingIds.has(war.id)}
+                                                title="Deploy this WAR"
+                                            >
+                                                {deployingIds.has(war.id)
+                                                    ? <span className="loading loading-spinner loading-xs" />
+                                                    : <FaRocket />}
+                                            </button>
+                                            <button type="button"
                                                 className="btn btn-ghost btn-xs"
                                                 onClick={() => openModal(war)}
                                                 title="Edit"
                                             >
                                                 <FaEdit />
                                             </button>
-                                            <button
+                                            <button type="button"
                                                 className="btn btn-ghost btn-xs text-error"
                                                 onClick={() => handleDelete(war.id)}
                                                 title="Delete"
@@ -469,22 +499,23 @@ const WarManager = () => {
                         </h3>
 
                         <div className="space-y-4">
-                            {/* Source Path */}
+                            {/* Project Path */}
                             <div>
-                                <label className="form-label">Source Path</label>
+                                <label className="form-label" htmlFor="war-source-path">Project Path</label>
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
                                         className="input input-bordered w-full font-mono text-sm"
-                                        placeholder="/path/to/artifact.war"
+                                        id="war-source-path"
+                                        placeholder="/path/to/maven/project"
                                         value={currentWar.sourcePath}
                                         onChange={(e) => setCurrentWar({ ...currentWar, sourcePath: e.target.value })}
                                     />
-                                    <button
+                                    <button type="button"
                                         className="btn btn-square btn-sm"
                                         onClick={async () => {
                                             try {
-                                                const path = await SelectWarFile();
+                                                const path = await SelectProjectDir();
                                                 if (path) setCurrentWar((prev) => ({ ...prev, sourcePath: path }));
                                             } catch (e) { console.error(e); }
                                         }}
@@ -497,8 +528,9 @@ const WarManager = () => {
 
                             {/* Destination Name */}
                             <div>
-                                <label className="form-label">Destination Name</label>
+                                <label className="form-label" htmlFor="war-dest-name">Destination Name</label>
                                 <input
+                                    id="war-dest-name"
                                     type="text"
                                     className="input input-bordered w-full font-mono text-sm"
                                     placeholder="app.war"
@@ -521,10 +553,10 @@ const WarManager = () => {
 
                         {/* Actions */}
                         <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-base-content/5">
-                            <button className="btn btn-ghost btn-sm" onClick={() => setModalOpen(false)}>
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setModalOpen(false)}>
                                 Cancel
                             </button>
-                            <button className="btn btn-primary btn-sm" onClick={handleSave}>
+                            <button type="button" className="btn btn-primary btn-sm" onClick={handleSave}>
                                 Save
                             </button>
                         </div>
