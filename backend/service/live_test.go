@@ -325,3 +325,73 @@ func get(t *testing.T, url string) (int, string) {
 	body, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(body)
 }
+
+// Restart has to wait for every port the old JVM held, not just HTTP: Tomcat
+// closes its connectors first and releases the shutdown port last.
+func TestLiveRestart(t *testing.T) {
+	install := os.Getenv("LIVE_TOMEE")
+	if install == "" {
+		t.Skip("set LIVE_TOMEE to run against a real installation")
+	}
+
+	home := t.TempDir()
+	t.Setenv("APPDATA", home)
+	t.Setenv("XDG_CONFIG_HOME", home)
+
+	storage := NewStorageService()
+	if err := storage.open(filepath.Join(t.TempDir(), "restart.db")); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = storage.db.Close() }()
+
+	config := model.Config{
+		TomEEPath: install, JavaHome: os.Getenv("LIVE_JAVA_HOME"),
+		HTTPPort: 18080, ShutdownPort: 18005, DebugPort: 18000,
+		IsolatedBase: true,
+	}
+	if err := storage.SaveConfig(config); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewTomEEService(storage)
+	if err := svc.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() {
+		if svc.IsRunning() {
+			_ = svc.Stop()
+		}
+		_ = waitForPortFree(18080, 60*time.Second)
+	})
+	waitUntilServing(t, 18080)
+
+	// Repeat it: a restart that races the old JVM tends to fail intermittently,
+	// so once proves little.
+	for i := 1; i <= 2; i++ {
+		start := time.Now()
+		if err := svc.Restart(); err != nil {
+			t.Fatalf("Restart %d: %v", i, err)
+		}
+		waitUntilServing(t, 18080)
+		t.Logf("restart %d came back up in %v", i, time.Since(start).Round(time.Millisecond))
+	}
+
+	if err := svc.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := waitForPortsFree(config, 60*time.Second); err != nil {
+		t.Errorf("ports not released: %v", err)
+	}
+}
+
+// waitUntilServing blocks until the server answers, failing the test on timeout.
+func waitUntilServing(t *testing.T, port int) {
+	t.Helper()
+	deadline := time.Now().Add(120 * time.Second)
+	for !httpAlive(port) {
+		if time.Now().After(deadline) {
+			t.Fatalf("TomEE never answered on port %d", port)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+}

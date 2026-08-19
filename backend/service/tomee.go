@@ -313,11 +313,13 @@ func (s *TomEEService) Restart() error {
 		if err := s.stopLocked(); err != nil {
 			return fmt.Errorf("failed to stop TomEE: %w", err)
 		}
-		// shutdown.bat returns as soon as the command is sent; the JVM keeps
-		// running while it tears down data sources and contexts. Waiting for
-		// the port to actually close beats a fixed sleep, which was either too
-		// short to be safe or too long to sit through.
-		if err := waitForPortFree(config.HTTPPort, shutdownTimeout); err != nil {
+		// Stopping only asks the server to stop; the JVM keeps running while it
+		// tears down data sources and contexts. Waiting for the ports to close
+		// beats a fixed sleep, which was either too short to be safe or too long
+		// to sit through. All of them, not just HTTP: Tomcat closes the
+		// connectors first and releases the shutdown port last, so checking HTTP
+		// alone would let the restart race ahead into a busy-port error.
+		if err := waitForPortsFree(config, shutdownTimeout); err != nil {
 			return err
 		}
 	}
@@ -327,6 +329,21 @@ func (s *TomEEService) Restart() error {
 // shutdownTimeout is how long Restart waits for the old JVM to let go of the
 // HTTP port. Applications with pooled data sources can take a while to close.
 const shutdownTimeout = 60 * time.Second
+
+// waitForPortsFree blocks until every port the next start needs is free.
+func waitForPortsFree(config model.Config, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		err := checkPortsFree(config)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("TomEE has not shut down after %s: %w", timeout, err)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
 
 func waitForPortFree(port int, timeout time.Duration) error {
 	if port == 0 {
