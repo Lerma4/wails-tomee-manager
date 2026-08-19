@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Start, Stop, Restart } from '../../wailsjs/go/service/TomEEService';
+import { Start, Stop, Restart, IsRunning } from '../../wailsjs/go/service/TomEEService';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { FaPlay, FaStop, FaRedo, FaCopy, FaCheck } from 'react-icons/fa';
 
@@ -17,6 +17,18 @@ const Dashboard = () => {
         });
     };
 
+    // Poll TomEE status every 3 seconds
+    useEffect(() => {
+        const poll = () => {
+            IsRunning()
+                .then((running) => setStatus(running ? 'Running' : 'Stopped'))
+                .catch(() => setStatus('Unknown'));
+        };
+        poll(); // immediate check on mount
+        const interval = setInterval(poll, 3000);
+        return () => clearInterval(interval);
+    }, []);
+
     useEffect(() => {
         const cancelLogListener = EventsOn("tomee-log", (log: string) => {
             setLogs((prev) => {
@@ -28,6 +40,7 @@ const Dashboard = () => {
         return () => { cancelLogListener(); };
     }, []);
 
+    // biome-ignore lint/correctness/useExhaustiveDependencies: `logs` is the trigger, not a value read by the effect
     useEffect(() => {
         logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [logs]);
@@ -36,10 +49,9 @@ const Dashboard = () => {
         setLoading(true);
         try {
             await actionFn();
-            setStatus(actionName === 'Stop' ? 'Stopped' : 'Running');
         } catch (err) {
             console.error(err);
-            alert(`Error during ${actionName}: ` + err);
+            alert(`Error during ${actionName}: ${err}`);
         } finally {
             setLoading(false);
         }
@@ -75,7 +87,7 @@ const Dashboard = () => {
                 <div className="panel p-5 md:col-span-2">
                     <span className="form-label">Actions</span>
                     <div className="flex gap-3 mt-3">
-                        <button
+                        <button type="button"
                             className="btn btn-success btn-sm gap-2"
                             onClick={() => handleAction('Start', Start)}
                             disabled={loading || status === 'Running'}
@@ -83,7 +95,7 @@ const Dashboard = () => {
 {loading ? <span className="loading loading-spinner loading-xs" /> : <FaPlay className="text-xs" />}
                             Start
                         </button>
-                        <button
+                        <button type="button"
                             className="btn btn-error btn-sm gap-2"
                             onClick={() => handleAction('Stop', Stop)}
                             disabled={loading || status !== 'Running'}
@@ -91,7 +103,7 @@ const Dashboard = () => {
 {loading ? <span className="loading loading-spinner loading-xs" /> : <FaStop className="text-xs" />}
                             Stop
                         </button>
-                        <button
+                        <button type="button"
                             className="btn btn-warning btn-sm gap-2"
                             onClick={() => handleAction('Restart', Restart)}
                             disabled={loading || status !== 'Running'}
@@ -112,7 +124,7 @@ const Dashboard = () => {
                     <span className="text-[0.7rem] font-mono text-base-content/30 ml-2 uppercase tracking-wider">
                         catalina.out
                     </span>
-                    <button
+                    <button type="button"
                         className="ml-auto btn btn-ghost btn-xs gap-1 text-base-content/40 hover:text-base-content/70"
                         onClick={copyLogs}
                         disabled={logs.length === 0}

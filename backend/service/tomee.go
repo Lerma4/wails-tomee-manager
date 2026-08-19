@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,31 @@ func NewTomEEService(storage *StorageService) *TomEEService {
 
 func (s *TomEEService) SetContext(ctx context.Context) {
 	s.ctx = ctx
+}
+
+// IsRunning reports whether TomEE is up: either we own the process, or an
+// instance started outside this app is answering on the configured HTTP port.
+func (s *TomEEService) IsRunning() bool {
+	s.mu.Lock()
+	owned := s.process != nil
+	s.mu.Unlock()
+	// The health check below can block for up to httpProbeTimeout, so it runs
+	// without the mutex — the Dashboard polls this every few seconds and must
+	// never stall Start/Stop.
+	if owned {
+		return true
+	}
+
+	config, err := s.configService.LoadConfig()
+	if err != nil {
+		return false
+	}
+	return config.HTTPPort != 0 && httpAlive(config.HTTPPort)
+}
+
+// runningLocked reports whether TomEE is up, ours or not. Caller must hold s.mu.
+func (s *TomEEService) runningLocked(config model.Config) bool {
+	return s.process != nil || (config.HTTPPort != 0 && httpAlive(config.HTTPPort))
 }
 
 func (s *TomEEService) Start() error {
@@ -76,7 +102,7 @@ func (s *TomEEService) startLocked() error {
 		cmd.Env = append(cmd.Env, "JPDA_TRANSPORT=dt_socket")
 	} else {
 		binPath := filepath.Join(config.TomEEPath, "bin", "catalina.sh")
-		os.Chmod(binPath, 0755)
+		_ = os.Chmod(binPath, 0755) // best effort: script may already be executable
 		cmd = exec.Command(binPath, "jpda", "run")
 		cmd.Env = os.Environ()
 		cmd.Env = append(cmd.Env, fmt.Sprintf("JPDA_ADDRESS=%d", config.DebugPort))
@@ -106,7 +132,7 @@ func (s *TomEEService) startLocked() error {
 
 	// Clear process state when TomEE exits naturally
 	go func() {
-		cmd.Wait()
+		_ = cmd.Wait() // exit status is irrelevant here; we only clear the state
 		s.mu.Lock()
 		if s.cmd == cmd {
 			s.cmd = nil
@@ -139,14 +165,20 @@ func (s *TomEEService) Stop() error {
 }
 
 // stopLocked performs the actual stop logic. Caller must hold s.mu.
+//
+// The shutdown script talks to TomEE over the shutdown port, so it also stops
+// an instance that was started outside this app — we do not need to own the
+// process to shut it down cleanly.
 func (s *TomEEService) stopLocked() error {
-	if s.process == nil {
-		return fmt.Errorf("TomEE is not running")
-	}
-
 	config, err := s.configService.LoadConfig()
 	if err != nil {
 		return err
+	}
+	if config.TomEEPath == "" {
+		return fmt.Errorf("tomee path not configured")
+	}
+	if !s.runningLocked(config) {
+		return fmt.Errorf("TomEE is not running")
 	}
 
 	var cmd *exec.Cmd
@@ -155,7 +187,7 @@ func (s *TomEEService) stopLocked() error {
 		cmd = exec.Command(binPath)
 	} else {
 		binPath := filepath.Join(config.TomEEPath, "bin", "shutdown.sh")
-		os.Chmod(binPath, 0755)
+		_ = os.Chmod(binPath, 0755) // best effort: script may already be executable
 		cmd = exec.Command(binPath)
 	}
 	cmd.Env = os.Environ()
@@ -166,8 +198,11 @@ func (s *TomEEService) stopLocked() error {
 	}
 
 	if err := cmd.Run(); err != nil {
-		// Graceful shutdown failed; force kill so the user isn't stuck
-		_ = s.process.Kill()
+		// Graceful shutdown failed. Force kill only what we own — an externally
+		// started instance has no process handle here, so the error stands.
+		if s.process != nil {
+			_ = s.process.Kill()
+		}
 		s.cmd = nil
 		s.process = nil
 		return fmt.Errorf("graceful shutdown failed: %w", err)
@@ -181,7 +216,11 @@ func (s *TomEEService) Restart() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.process != nil {
+	config, err := s.configService.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if s.runningLocked(config) {
 		if err := s.stopLocked(); err != nil {
 			return fmt.Errorf("failed to stop TomEE: %w", err)
 		}
@@ -234,15 +273,39 @@ func checkPortsFree(config model.Config) error {
 		if port == 0 {
 			continue
 		}
-		ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-		if err != nil {
+		if portBusy(port) {
 			busy = append(busy, fmt.Sprintf("%s port %d", name, port))
-		} else {
-			ln.Close()
 		}
 	}
 	if len(busy) > 0 {
 		return fmt.Errorf("the following ports are already in use: %s", strings.Join(busy, ", "))
 	}
 	return nil
+}
+
+// httpProbeTimeout bounds the health check: short enough that the Dashboard
+// poll stays responsive, long enough for a busy TomEE to answer.
+const httpProbeTimeout = time.Second
+
+// httpAlive reports whether something answers HTTP on the given local port.
+// Any response counts — TomEE with no root webapp replies 404, which still
+// means the server is up.
+func httpAlive(port int) bool {
+	client := &http.Client{Timeout: httpProbeTimeout}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
+}
+
+// portBusy reports whether something is already listening on the given TCP port.
+func portBusy(port int) bool {
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return true
+	}
+	ln.Close()
+	return false
 }
