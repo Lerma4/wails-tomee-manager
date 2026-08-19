@@ -6,11 +6,32 @@ type Config struct {
 	HTTPPort     int    `json:"httpPort"`
 	DebugPort    int    `json:"debugPort"`
 	ShutdownPort int    `json:"shutdownPort"`
+	// VMOptions is passed to the JVM as CATALINA_OPTS, e.g.
+	// "-Xmx2g -Dspring.profiles.active=dev".
+	VMOptions string `json:"vmOptions"`
+	// OpenBrowser opens the app root once the server reports startup.
+	OpenBrowser bool `json:"openBrowser"`
+	// IsolatedBase runs the server against a private CATALINA_BASE instead of
+	// writing into the TomEE installation. Off by default: turning it on gives
+	// the server an empty webapps directory until things are deployed again.
+	IsolatedBase bool `json:"isolatedBase"`
 }
+
+// Deploy modes for a WarArtifact.
+const (
+	// DeployCopy copies the built .war into webapps/. Tomcat then unpacks it.
+	DeployCopy = "copy"
+	// DeployWar points a context descriptor at the built .war in place.
+	DeployWar = "war"
+	// DeployExploded points a context descriptor at the exploded directory
+	// Maven writes next to the .war, so a rebuild is picked up without copying.
+	DeployExploded = "exploded"
+)
 
 type WarArtifact struct {
 	ID         int    `json:"id"`
 	SourcePath string `json:"sourcePath"`
 	DestName   string `json:"destName"`
 	Enabled    bool   `json:"enabled"`
+	DeployMode string `json:"deployMode"`
 }

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -10,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +35,12 @@ func NewTomEEService(storage *StorageService) *TomEEService {
 
 func (s *TomEEService) SetContext(ctx context.Context) {
 	s.ctx = ctx
+}
+
+func (s *TomEEService) emit(event string, data any) {
+	if s.ctx != nil {
+		wailsRuntime.EventsEmit(s.ctx, event, data)
+	}
 }
 
 // IsRunning reports whether TomEE is up: either we own the process, or an
@@ -88,47 +94,76 @@ func (s *TomEEService) startLocked() error {
 		return err
 	}
 
-	// Update ports in server.xml
-	if err := s.updateServerXml(config); err != nil {
-		return fmt.Errorf("failed to update server.xml: %w", err)
-	}
-
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		binPath := filepath.Join(config.TomEEPath, "bin", "catalina.bat")
-		cmd = exec.Command(binPath, "jpda", "run")
-		cmd.Env = os.Environ()
-		cmd.Env = append(cmd.Env, fmt.Sprintf("JPDA_ADDRESS=%d", config.DebugPort))
-		cmd.Env = append(cmd.Env, "JPDA_TRANSPORT=dt_socket")
-	} else {
-		binPath := filepath.Join(config.TomEEPath, "bin", "catalina.sh")
-		_ = os.Chmod(binPath, 0755) // best effort: script may already be executable
-		cmd = exec.Command(binPath, "jpda", "run")
-		cmd.Env = os.Environ()
-		cmd.Env = append(cmd.Env, fmt.Sprintf("JPDA_ADDRESS=%d", config.DebugPort))
-		cmd.Env = append(cmd.Env, "JPDA_TRANSPORT=dt_socket")
-	}
-
-	// Set CATALINA_HOME and CATALINA_BASE
-	cmd.Env = append(cmd.Env, fmt.Sprintf("CATALINA_HOME=%s", config.TomEEPath))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("CATALINA_BASE=%s", config.TomEEPath))
-	if config.JavaHome != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("JAVA_HOME=%s", config.JavaHome))
-	}
-
-	// Stream logs
-	stdout, _ := cmd.StdoutPipe()
-	stderr, _ := cmd.StderrPipe()
-
-	if err := cmd.Start(); err != nil {
+	base, err := prepareInstance(config)
+	if err != nil {
 		return err
 	}
 
+	if err := updateServerXml(base, config); err != nil {
+		return fmt.Errorf("failed to update server.xml: %w", err)
+	}
+
+	// The startup scripts always come from the installation; only CATALINA_BASE
+	// moves when the instance is isolated.
+	script := "catalina.sh"
+	if runtime.GOOS == "windows" {
+		script = "catalina.bat"
+	}
+	binPath := filepath.Join(config.TomEEPath, "bin", script)
+	if runtime.GOOS != "windows" {
+		_ = os.Chmod(binPath, 0755) // best effort: script may already be executable
+	}
+
+	cmd := command(binPath, "jpda", "run")
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("JPDA_ADDRESS=%d", config.DebugPort),
+		"JPDA_TRANSPORT=dt_socket",
+		fmt.Sprintf("CATALINA_HOME=%s", config.TomEEPath),
+		fmt.Sprintf("CATALINA_BASE=%s", base),
+	)
+	if config.JavaHome != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("JAVA_HOME=%s", config.JavaHome))
+	}
+	if opts := strings.TrimSpace(config.VMOptions); opts != "" {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("CATALINA_OPTS=%s", opts))
+	}
+
+	// One pipe for both streams. Catalina's ConsoleHandler writes every log
+	// record to stderr, so splitting the two would tag the whole log as errors
+	// and scramble the ordering of the lines that do come from stdout.
+	logReader, logWriter, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
+
+	if err := cmd.Start(); err != nil {
+		logReader.Close()
+		logWriter.Close()
+		return err
+	}
+	// The child holds its own handle now; ours has to go or the reader never
+	// sees EOF.
+	logWriter.Close()
+
 	s.cmd = cmd
 	s.process = cmd.Process
+	// The process exists, but the server will not answer for a while yet.
+	s.emit("tomee-status", "starting")
 
-	go s.streamLog(stdout, "INFO")
-	go s.streamLog(stderr, "ERROR")
+	go func() {
+		defer logReader.Close()
+		streamEntries(logReader, func(entry LogEntry) {
+			s.emit("tomee-log", entry)
+			if strings.Contains(entry.Text, startupMarker) {
+				s.emit("tomee-status", "running")
+				if config.OpenBrowser {
+					wailsRuntime.BrowserOpenURL(s.ctx, appURL(config.HTTPPort))
+				}
+			}
+		})
+	}()
 
 	// Clear process state when TomEE exits naturally
 	go func() {
@@ -139,23 +174,32 @@ func (s *TomEEService) startLocked() error {
 			s.process = nil
 		}
 		s.mu.Unlock()
+		s.emit("tomee-status", "stopped")
 	}()
 
 	return nil
 }
 
-func (s *TomEEService) streamLog(pipe javaIoReader, level string) {
-	scanner := bufio.NewScanner(pipe)
-	for scanner.Scan() {
-		text := scanner.Text()
-		if s.ctx != nil {
-			wailsRuntime.EventsEmit(s.ctx, "tomee-log", fmt.Sprintf("[%s] %s", level, text))
-		}
-	}
+// startupMarker is what Catalina logs once the server is ready to serve. Tomcat
+// leaves this message untranslated, so matching the English text holds on a
+// localised JVM too.
+const startupMarker = "Server startup in"
+
+func appURL(port int) string {
+	return fmt.Sprintf("http://localhost:%d/", port)
 }
 
-type javaIoReader interface {
-	Read(p []byte) (n int, err error)
+// OpenInBrowser opens the server root in the default browser.
+func (s *TomEEService) OpenInBrowser() error {
+	config, err := s.configService.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if config.HTTPPort == 0 {
+		return fmt.Errorf("http port not configured")
+	}
+	wailsRuntime.BrowserOpenURL(s.ctx, appURL(config.HTTPPort))
+	return nil
 }
 
 func (s *TomEEService) Stop() error {
@@ -166,9 +210,9 @@ func (s *TomEEService) Stop() error {
 
 // stopLocked performs the actual stop logic. Caller must hold s.mu.
 //
-// The shutdown script talks to TomEE over the shutdown port, so it also stops
-// an instance that was started outside this app — we do not need to own the
-// process to shut it down cleanly.
+// Shutting down goes over the shutdown port, so this also stops an instance
+// that was started outside this app — we do not need to own the process to shut
+// it down cleanly.
 func (s *TomEEService) stopLocked() error {
 	config, err := s.configService.LoadConfig()
 	if err != nil {
@@ -181,35 +225,80 @@ func (s *TomEEService) stopLocked() error {
 		return fmt.Errorf("TomEE is not running")
 	}
 
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		binPath := filepath.Join(config.TomEEPath, "bin", "shutdown.bat")
-		cmd = exec.Command(binPath)
-	} else {
-		binPath := filepath.Join(config.TomEEPath, "bin", "shutdown.sh")
-		_ = os.Chmod(binPath, 0755) // best effort: script may already be executable
-		cmd = exec.Command(binPath)
-	}
-	cmd.Env = os.Environ()
-	cmd.Env = append(cmd.Env, fmt.Sprintf("CATALINA_HOME=%s", config.TomEEPath))
-	cmd.Env = append(cmd.Env, fmt.Sprintf("CATALINA_BASE=%s", config.TomEEPath))
-	if config.JavaHome != "" {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("JAVA_HOME=%s", config.JavaHome))
+	base, err := instanceDir(config)
+	if err != nil {
+		return err
 	}
 
-	if err := cmd.Run(); err != nil {
+	if err := sendShutdownCommand(base, config.ShutdownPort); err != nil {
 		// Graceful shutdown failed. Force kill only what we own — an externally
 		// started instance has no process handle here, so the error stands.
-		if s.process != nil {
-			_ = s.process.Kill()
+		if s.process == nil {
+			return fmt.Errorf("graceful shutdown failed: %w", err)
 		}
-		s.cmd = nil
-		s.process = nil
-		return fmt.Errorf("graceful shutdown failed: %w", err)
+		s.emit("tomee-log", LogEntry{
+			Level: "WARN",
+			Text:  fmt.Sprintf("Graceful shutdown failed (%v); killing the server process instead.", err),
+		})
+		_ = s.process.Kill()
 	}
 	s.cmd = nil
 	s.process = nil
 	return nil
+}
+
+// sendShutdownCommand speaks Tomcat's shutdown protocol directly: connect to the
+// shutdown port, write the shutdown string, close.
+//
+// This replaces shutdown.bat, which spawns a whole JVM only to open this socket
+// — and which fails on a dual-stack Windows host: Catalina resolves the default
+// address "localhost" to ::1 and connects with the single-address Socket
+// constructor, while the server binds its shutdown socket on 127.0.0.1. Doing
+// it here also works for a server this app did not start.
+func sendShutdownCommand(base string, port int) error {
+	if port == 0 {
+		return fmt.Errorf("shutdown port not configured")
+	}
+	address, command := shutdownEndpoint(base)
+
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(address, strconv.Itoa(port)), 5*time.Second)
+	if err != nil {
+		return fmt.Errorf("cannot reach the shutdown port at %s:%d: %w", address, port, err)
+	}
+	defer conn.Close()
+
+	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		return err
+	}
+	if _, err := conn.Write([]byte(command)); err != nil {
+		return fmt.Errorf("failed to send the shutdown command: %w", err)
+	}
+	return nil
+}
+
+// shutdownEndpoint reads the shutdown address and command out of server.xml,
+// falling back to Tomcat's documented defaults when either is absent.
+func shutdownEndpoint(base string) (address, command string) {
+	address, command = "127.0.0.1", "SHUTDOWN"
+
+	doc := etree.NewDocument()
+	if err := doc.ReadFromFile(filepath.Join(base, "conf", "server.xml")); err != nil {
+		return address, command
+	}
+	server := doc.FindElement("//Server")
+	if server == nil {
+		return address, command
+	}
+	if value := server.SelectAttrValue("shutdown", ""); value != "" {
+		command = value
+	}
+	// "localhost" is both the default and the value that misresolves, so it maps
+	// to the loopback address the server actually binds; anything set explicitly
+	// is honoured as written.
+	if value := server.SelectAttrValue("address", ""); value != "" && !strings.EqualFold(value, "localhost") {
+		address = value
+	}
+	return address, command
 }
 
 func (s *TomEEService) Restart() error {
@@ -224,42 +313,79 @@ func (s *TomEEService) Restart() error {
 		if err := s.stopLocked(); err != nil {
 			return fmt.Errorf("failed to stop TomEE: %w", err)
 		}
-		time.Sleep(5 * time.Second)
+		// shutdown.bat returns as soon as the command is sent; the JVM keeps
+		// running while it tears down data sources and contexts. Waiting for
+		// the port to actually close beats a fixed sleep, which was either too
+		// short to be safe or too long to sit through.
+		if err := waitForPortFree(config.HTTPPort, shutdownTimeout); err != nil {
+			return err
+		}
 	}
 	return s.startLocked()
 }
 
-func (s *TomEEService) updateServerXml(config model.Config) error {
-	serverXmlPath := filepath.Join(config.TomEEPath, "conf", "server.xml")
+// shutdownTimeout is how long Restart waits for the old JVM to let go of the
+// HTTP port. Applications with pooled data sources can take a while to close.
+const shutdownTimeout = 60 * time.Second
+
+func waitForPortFree(port int, timeout time.Duration) error {
+	if port == 0 {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		if !portBusy(port) {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("TomEE is still holding port %d after %s; it may not have shut down", port, timeout)
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+}
+
+func updateServerXml(base string, config model.Config) error {
+	serverXmlPath := filepath.Join(base, "conf", "server.xml")
 
 	doc := etree.NewDocument()
 	if err := doc.ReadFromFile(serverXmlPath); err != nil {
 		return err
 	}
 
-	// Update Server Shutdown Port
-	// <Server port="...">
 	if server := doc.FindElement("//Server"); server != nil {
-		server.CreateAttr("port", fmt.Sprintf("%d", config.ShutdownPort))
+		server.CreateAttr("port", strconv.Itoa(config.ShutdownPort))
 	}
 
-	// Update HTTP Connector Port
-	// <Connector port="..." protocol="HTTP/1.1">
+	// Only the first plain HTTP connector: pointing several of them at the same
+	// port stops the server from starting at all.
 	for _, connector := range doc.FindElements("//Connector") {
-		protocol := connector.SelectAttrValue("protocol", "")
-		// Check if it's HTTP/1.1 or similar (often just HTTP/1.1 or org.apache.coyote.http11.Http11NioProtocol)
-		if strings.Contains(protocol, "HTTP") || protocol == "" { // Assuming default is HTTP if not specified? No, AJP usually specifies protocol.
-			// Let's look for standard HTTP connector.
-			// Usually port 8080.
-			// If we want to be precise, we might need more config from user, but let's assume the main HTTP connector.
-			// Or we can check if it DOESN'T have "AJP" in protocol.
-			if !strings.Contains(protocol, "AJP") {
-				connector.CreateAttr("port", fmt.Sprintf("%d", config.HTTPPort))
-			}
+		if !isPlainHTTPConnector(connector) {
+			continue
 		}
+		connector.CreateAttr("port", strconv.Itoa(config.HTTPPort))
+		break
 	}
 
 	return doc.WriteToFile(serverXmlPath)
+}
+
+// isPlainHTTPConnector picks out the connector the application is served on.
+//
+// In a real server.xml the protocol attribute is a class name
+// ("org.apache.coyote.http11.Http11NioProtocol"), never the literal "HTTP/1.1",
+// so it has to be matched case-insensitively. The HTTPS connector uses the very
+// same protocol class and is only distinguishable by its SSL attributes.
+func isPlainHTTPConnector(connector *etree.Element) bool {
+	// An absent protocol attribute means HTTP/1.1, per the Tomcat docs.
+	if strings.Contains(strings.ToUpper(connector.SelectAttrValue("protocol", "HTTP/1.1")), "AJP") {
+		return false
+	}
+	for _, attr := range []string{"SSLEnabled", "secure"} {
+		if strings.EqualFold(connector.SelectAttrValue(attr, ""), "true") {
+			return false
+		}
+	}
+	return !strings.EqualFold(connector.SelectAttrValue("scheme", ""), "https")
 }
 
 func checkPortsFree(config model.Config) error {

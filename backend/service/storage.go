@@ -27,8 +27,12 @@ func (s *StorageService) Init() error {
 	if err := os.MkdirAll(dbPath, 0755); err != nil {
 		return fmt.Errorf("failed to create config directory %s: %w", dbPath, err)
 	}
-	dbFile := filepath.Join(dbPath, "data.db")
+	return s.open(filepath.Join(dbPath, "data.db"))
+}
 
+// open connects to a database file and brings its schema up to date. Split out
+// of Init so tests can drive it against a temporary file.
+func (s *StorageService) open(dbFile string) error {
 	db, err := sql.Open("sqlite", dbFile)
 	if err != nil {
 		return err
@@ -63,8 +67,17 @@ func (s *StorageService) createTables() error {
 		return err
 	}
 
-	// Migrate: add java_home column if missing (errors when it already exists)
-	_, _ = s.db.Exec(`ALTER TABLE config ADD COLUMN java_home TEXT DEFAULT ''`)
+	// Migrations: ALTER TABLE errors out when the column is already there, which
+	// is the normal case on every run after the first.
+	for _, migration := range []string{
+		`ALTER TABLE config ADD COLUMN java_home TEXT DEFAULT ''`,
+		`ALTER TABLE config ADD COLUMN vm_options TEXT DEFAULT ''`,
+		`ALTER TABLE config ADD COLUMN open_browser BOOLEAN DEFAULT 0`,
+		`ALTER TABLE config ADD COLUMN isolated_base BOOLEAN DEFAULT 0`,
+		`ALTER TABLE wars ADD COLUMN deploy_mode TEXT DEFAULT 'copy'`,
+	} {
+		_, _ = s.db.Exec(migration)
+	}
 
 	// Init default config if not exists
 	_, err := s.db.Exec(`INSERT OR IGNORE INTO config (id, tomee_path, java_home, http_port, debug_port, shutdown_port) VALUES (1, '', '', 8080, 8000, 8005)`)
@@ -72,28 +85,33 @@ func (s *StorageService) createTables() error {
 }
 
 func (s *StorageService) SaveConfig(config model.Config) error {
-	_, err := s.db.Exec(`UPDATE config SET tomee_path=?, java_home=?, http_port=?, debug_port=?, shutdown_port=? WHERE id=1`,
-		config.TomEEPath, config.JavaHome, config.HTTPPort, config.DebugPort, config.ShutdownPort)
+	_, err := s.db.Exec(
+		`UPDATE config SET tomee_path=?, java_home=?, http_port=?, debug_port=?, shutdown_port=?, vm_options=?, open_browser=?, isolated_base=? WHERE id=1`,
+		config.TomEEPath, config.JavaHome, config.HTTPPort, config.DebugPort, config.ShutdownPort,
+		config.VMOptions, config.OpenBrowser, config.IsolatedBase)
 	return err
 }
 
 func (s *StorageService) LoadConfig() (model.Config, error) {
 	var config model.Config
-	row := s.db.QueryRow(`SELECT tomee_path, java_home, http_port, debug_port, shutdown_port FROM config WHERE id=1`)
-	err := row.Scan(&config.TomEEPath, &config.JavaHome, &config.HTTPPort, &config.DebugPort, &config.ShutdownPort)
+	row := s.db.QueryRow(`SELECT tomee_path, java_home, http_port, debug_port, shutdown_port, vm_options, open_browser, isolated_base FROM config WHERE id=1`)
+	err := row.Scan(&config.TomEEPath, &config.JavaHome, &config.HTTPPort, &config.DebugPort, &config.ShutdownPort,
+		&config.VMOptions, &config.OpenBrowser, &config.IsolatedBase)
 	return config, err
 }
 
 func (s *StorageService) SaveWar(war model.WarArtifact) error {
+	if war.DeployMode == "" {
+		war.DeployMode = model.DeployCopy
+	}
 	if war.ID == 0 {
-		_, err := s.db.Exec(`INSERT INTO wars (source_path, dest_name, enabled) VALUES (?, ?, ?)`,
-			war.SourcePath, war.DestName, war.Enabled)
-		return err
-	} else {
-		_, err := s.db.Exec(`UPDATE wars SET source_path=?, dest_name=?, enabled=? WHERE id=?`,
-			war.SourcePath, war.DestName, war.Enabled, war.ID)
+		_, err := s.db.Exec(`INSERT INTO wars (source_path, dest_name, enabled, deploy_mode) VALUES (?, ?, ?, ?)`,
+			war.SourcePath, war.DestName, war.Enabled, war.DeployMode)
 		return err
 	}
+	_, err := s.db.Exec(`UPDATE wars SET source_path=?, dest_name=?, enabled=?, deploy_mode=? WHERE id=?`,
+		war.SourcePath, war.DestName, war.Enabled, war.DeployMode, war.ID)
+	return err
 }
 
 func (s *StorageService) DeleteWar(id int) error {
@@ -103,13 +121,13 @@ func (s *StorageService) DeleteWar(id int) error {
 
 func (s *StorageService) GetWar(id int) (model.WarArtifact, error) {
 	var war model.WarArtifact
-	row := s.db.QueryRow(`SELECT id, source_path, dest_name, enabled FROM wars WHERE id=?`, id)
-	err := row.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled)
+	row := s.db.QueryRow(`SELECT id, source_path, dest_name, enabled, COALESCE(deploy_mode, 'copy') FROM wars WHERE id=?`, id)
+	err := row.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled, &war.DeployMode)
 	return war, err
 }
 
 func (s *StorageService) ListWars() ([]model.WarArtifact, error) {
-	rows, err := s.db.Query(`SELECT id, source_path, dest_name, enabled FROM wars`)
+	rows, err := s.db.Query(`SELECT id, source_path, dest_name, enabled, COALESCE(deploy_mode, 'copy') FROM wars ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -118,10 +136,10 @@ func (s *StorageService) ListWars() ([]model.WarArtifact, error) {
 	var wars []model.WarArtifact
 	for rows.Next() {
 		var war model.WarArtifact
-		if err := rows.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled); err != nil {
+		if err := rows.Scan(&war.ID, &war.SourcePath, &war.DestName, &war.Enabled, &war.DeployMode); err != nil {
 			return nil, err
 		}
 		wars = append(wars, war)
 	}
-	return wars, nil
+	return wars, rows.Err()
 }

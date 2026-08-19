@@ -1,13 +1,38 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ListWars, SaveWar, DeleteWar } from '../../wailsjs/go/service/StorageService';
-import { DeployAll as DeployAllWars, DeploySingle } from '../../wailsjs/go/service/WarService';
+import { DeployAll as DeployAllWars, DeploySingle, IsDeployed, Undeploy } from '../../wailsjs/go/service/WarService';
+import { Restart } from '../../wailsjs/go/service/TomEEService';
 import { CheckWarExists, RunBuild } from '../../wailsjs/go/service/MavenService';
 import { SelectProjectDir } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { model } from '../../wailsjs/go/models';
-import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen, FaSync, FaCheckCircle, FaTimesCircle, FaHammer, FaFileAlt } from 'react-icons/fa';
+import { FaPlus, FaTrash, FaEdit, FaRocket, FaFolder, FaBoxOpen, FaSync, FaCheckCircle, FaTimesCircle, FaHammer, FaFileAlt, FaBolt, FaEject } from 'react-icons/fa';
 
 type BuildState = 'idle' | 'building' | 'success' | 'error';
+
+/** Where a deploy puts the artifact. Mirrors the constants in backend/model. */
+const DEPLOY_MODES = {
+    copy: {
+        label: 'Copy',
+        hint: 'Copies the built .war into webapps/. Tomcat unpacks it, so a rebuild needs a redeploy.',
+    },
+    war: {
+        label: 'War',
+        hint: 'Writes a context descriptor pointing at the .war in target/. Nothing is copied.',
+    },
+    exploded: {
+        label: 'Exploded',
+        hint: 'Writes a context descriptor pointing at the exploded target/ directory, so a rebuild is picked up in place.',
+    },
+} as const;
+
+type DeployMode = keyof typeof DEPLOY_MODES;
+
+const deployModeOf = (war: model.WarArtifact): DeployMode =>
+    (war.deployMode in DEPLOY_MODES ? war.deployMode : 'copy') as DeployMode;
+
+/** Stages of the Build to Deploy to Restart chain, or '' when idle. */
+type ChainStage = '' | 'building' | 'deploying' | 'restarting';
 
 /* ------------------------------------------------------------------ */
 /*  BuildLogModal                                                      */
@@ -91,6 +116,13 @@ const WarManager = () => {
 
     // Task 5 — WAR existence check
     const [warExistsMap, setWarExistsMap] = useState<Record<number, boolean | null>>({});
+    const [deployedMap, setDeployedMap] = useState<Record<number, boolean | null>>({});
+
+    // Build to Deploy to Restart chain. The queue is a ref because the
+    // maven-done listener below is registered once per WAR and must see the
+    // current value, not the one captured when it was registered.
+    const chainQueue = useRef<Set<number>>(new Set());
+    const [chainStage, setChainStage] = useState<Record<number, ChainStage>>({});
 
     // Task 6 — Maven build per-row
     const [buildStates, setBuildStates] = useState<Record<number, BuildState>>({});
@@ -109,8 +141,18 @@ const WarManager = () => {
             .catch(() => setWarExistsMap((prev) => ({ ...prev, [war.id]: false })));
     };
 
+    const checkDeployed = (war: model.WarArtifact) => {
+        setDeployedMap((prev) => ({ ...prev, [war.id]: null }));
+        IsDeployed(war.id)
+            .then((deployed) => setDeployedMap((prev) => ({ ...prev, [war.id]: deployed })))
+            .catch(() => setDeployedMap((prev) => ({ ...prev, [war.id]: false })));
+    };
+
     const checkAllWarExists = (warList: model.WarArtifact[]) => {
-        warList.forEach((w) => { checkWarExists(w); });
+        warList.forEach((w) => {
+            checkWarExists(w);
+            checkDeployed(w);
+        });
     };
 
     /* ---------- Fetch & lifecycle ---------- */
@@ -127,6 +169,26 @@ const WarManager = () => {
 
     // biome-ignore lint/correctness/useExhaustiveDependencies: initial load only; fetchWars is re-created every render
     useEffect(() => { fetchWars(); }, []);
+
+    /* ---------- Build to Deploy to Restart chain ---------- */
+
+    // Only stable references are used here: the listener registered per WAR
+    // keeps whichever closure it was created with.
+    const runDeployAndRestart = useCallback(async (warId: number) => {
+        try {
+            setChainStage((prev) => ({ ...prev, [warId]: 'deploying' }));
+            await DeploySingle(warId);
+            setChainStage((prev) => ({ ...prev, [warId]: 'restarting' }));
+            await Restart();
+        } catch (err) {
+            alert(`Build and Run failed: ${err}`);
+        } finally {
+            setChainStage((prev) => ({ ...prev, [warId]: '' }));
+            IsDeployed(warId)
+                .then((deployed) => setDeployedMap((prev) => ({ ...prev, [warId]: deployed })))
+                .catch(() => undefined);
+        }
+    }, []);
 
     /* ---------- Event listeners for Maven build ---------- */
 
@@ -166,6 +228,15 @@ const WarManager = () => {
                 // Re-check WAR existence for this artifact
                 const w = warsRef.current.find((x) => x.id === war.id);
                 if (w) checkWarExists(w);
+
+                // Continue the chain only when the build actually produced something.
+                if (chainQueue.current.delete(war.id)) {
+                    if (result.success) {
+                        runDeployAndRestart(war.id);
+                    } else {
+                        setChainStage((prev) => ({ ...prev, [war.id]: '' }));
+                    }
+                }
 
                 // Reset to idle after 3 seconds
                 const prevTimer = buildTimers.current.get(war.id);
@@ -207,6 +278,9 @@ const WarManager = () => {
         try {
             await RunBuild(warId, mavenProfile);
         } catch (err) {
+            // No maven-done event will arrive, so the chain has to be released here.
+            chainQueue.current.delete(warId);
+            setChainStage((prev) => ({ ...prev, [warId]: '' }));
             setBuildStates((prev) => ({ ...prev, [warId]: 'error' }));
             setBuildLogs((prev) => ({
                 ...prev,
@@ -219,6 +293,24 @@ const WarManager = () => {
                 buildTimers.current.delete(warId);
             }, 3000);
             buildTimers.current.set(warId, timer);
+        }
+    };
+
+    const handleBuildAndRun = async (warId: number) => {
+        chainQueue.current.add(warId);
+        setChainStage((prev) => ({ ...prev, [warId]: 'building' }));
+        await handleBuild(warId);
+    };
+
+    const handleUndeploy = async (warId: number) => {
+        if (!window.confirm('Remove this artifact from the server? The build output is left untouched.')) return;
+        try {
+            await Undeploy(warId);
+        } catch (err) {
+            alert(`Undeploy failed: ${err}`);
+        } finally {
+            const war = warsRef.current.find((w) => w.id === warId);
+            if (war) checkDeployed(war);
         }
     };
 
@@ -248,6 +340,7 @@ const WarManager = () => {
         setDeploying(true);
         try {
             await DeployAllWars();
+            warsRef.current.forEach((w) => { checkDeployed(w); });
             alert('Deployment successful!');
         } catch (err) {
             alert(`Deployment failed: ${err}`);
@@ -268,11 +361,17 @@ const WarManager = () => {
                 next.delete(warId);
                 return next;
             });
+            const war = warsRef.current.find((w) => w.id === warId);
+            if (war) checkDeployed(war);
         }
     };
 
     const openModal = (war?: model.WarArtifact) => {
-        setCurrentWar(war ? { ...war } : new model.WarArtifact());
+        setCurrentWar(
+            war
+                ? { ...war, deployMode: deployModeOf(war) }
+                : model.WarArtifact.createFrom({ enabled: true, deployMode: 'copy' }),
+        );
         setModalOpen(true);
     };
 
@@ -352,6 +451,17 @@ const WarManager = () => {
         return <FaTimesCircle className="text-error" />;
     };
 
+    /* ---------- Deployed indicator ---------- */
+
+    const renderDeployedIndicator = (warId: number) => {
+        if (deployedMap[warId] !== true) return null;
+        return (
+            <span className="badge badge-xs badge-success ml-2 align-middle" title="Currently deployed on the server">
+                on server
+            </span>
+        );
+    };
+
     /* ---------- Render ---------- */
 
     return (
@@ -424,8 +534,9 @@ const WarManager = () => {
                                 <th>Project Path</th>
                                 <th className="w-20 text-center">WAR File</th>
                                 <th>Destination</th>
+                                <th className="w-24 text-center">Mode</th>
                                 <th className="w-20 text-center">Build</th>
-                                <th className="w-24 text-right">Actions</th>
+                                <th className="w-32 text-right">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -451,12 +562,33 @@ const WarManager = () => {
                                         <span className="font-mono text-xs font-medium text-primary/80">
                                             {war.destName}
                                         </span>
+                                        {renderDeployedIndicator(war.id)}
+                                    </td>
+                                    <td className="text-center">
+                                        <span
+                                            className="badge badge-sm badge-ghost font-mono text-[0.65rem]"
+                                            title={DEPLOY_MODES[deployModeOf(war)].hint}
+                                        >
+                                            {DEPLOY_MODES[deployModeOf(war)].label}
+                                        </span>
                                     </td>
                                     <td className="text-center">
                                         {renderBuildButton(war)}
                                     </td>
                                     <td>
                                         <div className="flex gap-1 justify-end">
+                                            <button type="button"
+                                                className="btn btn-ghost btn-xs text-primary"
+                                                onClick={() => handleBuildAndRun(war.id)}
+                                                disabled={(chainStage[war.id] || '') !== ''}
+                                                title={chainStage[war.id]
+                                                    ? `${chainStage[war.id]}...`
+                                                    : 'Build, deploy, then restart TomEE'}
+                                            >
+                                                {chainStage[war.id]
+                                                    ? <span className="loading loading-spinner loading-xs" />
+                                                    : <FaBolt />}
+                                            </button>
                                             <button type="button"
                                                 className="btn btn-ghost btn-xs text-secondary"
                                                 onClick={() => handleDeploySingle(war.id)}
@@ -466,6 +598,14 @@ const WarManager = () => {
                                                 {deployingIds.has(war.id)
                                                     ? <span className="loading loading-spinner loading-xs" />
                                                     : <FaRocket />}
+                                            </button>
+                                            <button type="button"
+                                                className="btn btn-ghost btn-xs text-warning"
+                                                onClick={() => handleUndeploy(war.id)}
+                                                disabled={deployedMap[war.id] === false}
+                                                title="Remove this artifact from the server"
+                                            >
+                                                <FaEject />
                                             </button>
                                             <button type="button"
                                                 className="btn btn-ghost btn-xs"
@@ -537,6 +677,24 @@ const WarManager = () => {
                                     value={currentWar.destName}
                                     onChange={(e) => setCurrentWar({ ...currentWar, destName: e.target.value })}
                                 />
+                            </div>
+
+                            {/* Deploy Mode */}
+                            <div>
+                                <label className="form-label" htmlFor="war-deploy-mode">Deploy Mode</label>
+                                <select
+                                    id="war-deploy-mode"
+                                    className="select select-bordered w-full text-sm"
+                                    value={deployModeOf(currentWar)}
+                                    onChange={(e) => setCurrentWar({ ...currentWar, deployMode: e.target.value })}
+                                >
+                                    {Object.entries(DEPLOY_MODES).map(([value, mode]) => (
+                                        <option key={value} value={value}>{mode.label}</option>
+                                    ))}
+                                </select>
+                                <p className="text-xs text-base-content/40 mt-1">
+                                    {DEPLOY_MODES[deployModeOf(currentWar)].hint}
+                                </p>
                             </div>
 
                             {/* Enabled */}

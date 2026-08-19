@@ -247,3 +247,148 @@ body {
   font-weight: 600;
   letter-spacing: 0.02em;
 }
+
+/* ── Log Console ── */
+/* Level is carried by colour on the left edge and a small tag, so an error is
+   recognisable while the console is scrolling past. */
+.log-entry {
+  display: flex;
+  gap: 0.5rem;
+  padding: 2px 0 2px 0.5rem;
+  border-left: 2px solid transparent;
+  scroll-margin: 2rem;
+}
+.log-entry-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  flex: 1;
+  min-width: 0;
+}
+.log-entry-level {
+  flex: none;
+  width: 3.2rem;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  padding-top: 0.2rem;
+  opacity: 0.55;
+  user-select: none;
+}
+.log-entry-error {
+  border-left-color: oklch(65% 0.22 25);
+  background: oklch(65% 0.22 25 / 0.07);
+  color: oklch(80% 0.13 25);
+}
+.log-entry-warn {
+  border-left-color: oklch(82% 0.16 85);
+  background: oklch(82% 0.16 85 / 0.05);
+  color: oklch(85% 0.11 85);
+}
+.log-entry-info {
+  color: oklch(70% 0.04 155);
+}
+.log-entry-debug {
+  color: oklch(52% 0.02 260);
+}
+.log-entry.is-current {
+  outline: 1px solid oklch(72% 0.14 210 / 0.6);
+  border-radius: 0.2rem;
+}
+.log-entry-more {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+  color: oklch(62% 0.12 210);
+  opacity: 0.8;
+}
+.log-entry-more:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.log-mark {
+  background: oklch(82% 0.16 85 / 0.35);
+  color: inherit;
+  border-radius: 2px;
+}
+
+/* Level filter chips: the count is the alarm, so it stays legible when off. */
+.log-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.3rem;
+  border: 1px solid transparent;
+  transition: opacity 0.15s ease;
+}
+.log-chip.is-off {
+  opacity: 0.35;
+  text-decoration: line-through;
+}
+.log-chip-count {
+  font-family: var(--font-mono);
+  opacity: 0.7;
+}
+.log-chip-error {
+  color: oklch(78% 0.16 25);
+  border-color: oklch(65% 0.22 25 / 0.4);
+}
+.log-chip-warn {
+  color: oklch(84% 0.14 85);
+  border-color: oklch(82% 0.16 85 / 0.35);
+}
+.log-chip-info {
+  color: oklch(70% 0.06 155);
+  border-color: oklch(70% 0.06 155 / 0.3);
+}
+.log-chip-debug {
+  color: oklch(58% 0.02 260);
+  border-color: oklch(58% 0.02 260 / 0.3);
+}
+
+.log-search {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.3rem;
+  background: oklch(16% 0.012 260);
+  border: 1px solid oklch(22% 0.015 260);
+}
+.log-search input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 0.7rem;
+  width: 9rem;
+  color: oklch(85% 0.008 260);
+}
+
+/* Shown only while the tail is paused, so it never covers live output. */
+.log-resume {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  background: oklch(30% 0.03 260);
+  border: 1px solid oklch(40% 0.03 260);
+  color: oklch(85% 0.01 260);
+  box-shadow: 0 2px 10px oklch(0% 0 0 / 0.4);
+}
+.log-resume:hover {
+  background: oklch(36% 0.04 260);
+}
+
+/* The paused-tail pill anchors to the console. */
+.terminal {
+  position: relative;
+}
