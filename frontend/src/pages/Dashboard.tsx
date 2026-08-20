@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IsRunning, OpenInBrowser, Restart, Start, Stop } from '../../wailsjs/go/service/TomEEService';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
+import { type Level, clearLogs, useLogs } from '../logStore';
 import {
     FaArrowDown,
     FaCheck,
@@ -16,28 +17,12 @@ import {
     FaTrash,
 } from 'react-icons/fa';
 
-type Level = 'ERROR' | 'WARN' | 'INFO' | 'DEBUG';
-
-/** One log record as the backend groups it: header, level line and stack trace together. */
-interface LogEntry {
-    level: Level;
-    text: string;
-}
-
-interface Row extends LogEntry {
-    id: number;
-}
-
 /** Starting is its own state: the process exists long before the server answers. */
 type ServerStatus = 'Running' | 'Starting' | 'Stopped' | 'Unknown';
 
 const LEVELS: Level[] = ['ERROR', 'WARN', 'INFO', 'DEBUG'];
 const LEVEL_LABEL: Record<Level, string> = { ERROR: 'Errors', WARN: 'Warnings', INFO: 'Info', DEBUG: 'Debug' };
 
-/** Enough history to cover a full startup without letting the DOM grow unbounded. */
-const MAX_ENTRIES = 2000;
-/** Records are collected and applied in batches: startup emits hundreds per second. */
-const FLUSH_INTERVAL_MS = 120;
 /** A record longer than this is clamped until the user opens it. */
 const CLAMP_LINES = 6;
 
@@ -68,7 +53,7 @@ const Highlighted = ({ text, query }: { text: string; query: string }) => {
 const Dashboard = () => {
     const [loading, setLoading] = useState(false);
     const [status, setStatus] = useState<ServerStatus>('Unknown');
-    const [entries, setEntries] = useState<Row[]>([]);
+    const entries = useLogs();
     const [copied, setCopied] = useState(false);
 
     const [hidden, setHidden] = useState<Set<Level>>(new Set());
@@ -83,27 +68,6 @@ const Dashboard = () => {
 
     const bodyRef = useRef<HTMLDivElement>(null);
     const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
-    const pending = useRef<Row[]>([]);
-    const nextId = useRef(0);
-
-    /* ---------- log intake ---------- */
-
-    useEffect(() => {
-        const cancel = EventsOn('tomee-log', (entry: LogEntry) => {
-            pending.current.push({ ...entry, id: nextId.current++ });
-        });
-        const timer = setInterval(() => {
-            if (pending.current.length === 0) return;
-            const batch = pending.current;
-            pending.current = [];
-            setEntries((prev) => [...prev, ...batch].slice(-MAX_ENTRIES));
-        }, FLUSH_INTERVAL_MS);
-
-        return () => {
-            cancel();
-            clearInterval(timer);
-        };
-    }, []);
 
     /* ---------- server status ---------- */
 
@@ -228,8 +192,8 @@ const Dashboard = () => {
         });
     };
 
-    const clearLogs = () => {
-        setEntries([]);
+    const handleClear = () => {
+        clearLogs();
         setExpanded(new Set());
         setMatchIndex(0);
     };
@@ -436,7 +400,7 @@ const Dashboard = () => {
                         <button
                             type="button"
                             className="btn btn-ghost btn-xs px-1 text-base-content/40 hover:text-base-content/70"
-                            onClick={clearLogs}
+                            onClick={handleClear}
                             disabled={entries.length === 0}
                             title="Clear the console"
                         >
